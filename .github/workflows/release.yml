@@ -1,0 +1,45 @@
+name: Build AppImage
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Qt and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 desktop-file-utils
+          pip install PyQt6 pyinstaller
+      - name: Build binary
+        run: pyinstaller --noconfirm --windowed --name mtproto-finder --add-data logo.png:. main.py
+      - name: Assemble AppDir
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -r dist/mtproto-finder/* AppDir/usr/bin/
+          cp logo.png AppDir/mtproto-finder.png
+          cp logo.png AppDir/logo.png
+          cp logo.png AppDir/usr/share/icons/hicolor/256x256/apps/mtproto-finder.png
+          printf '[Desktop Entry]\nType=Application\nName=MTProto Finder\nComment=Find working MTProto proxies for Telegram with real ping\nExec=AppRun\nIcon=mtproto-finder\nTerminal=false\nCategories=Network;\n' > AppDir/mtproto-finder.desktop
+          printf '#!/bin/bash\nSELF="$(readlink -f "$0")"\nHERE="${SELF%%/*}"\nexec "$HERE/usr/bin/mtproto-finder" "$@"\n' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+          ln -sf usr/bin/mtproto-finder AppDir/.DirIcon
+      - name: Download appimagetool
+        run: |
+          curl -sL -o appimagetool.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          ./appimagetool.AppImage --appimage-extract-and-run AppDir MTProto-Finder-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MTProto-Finder-x86_64.AppImage
+          path: MTProto-Finder-x86_64.AppImage
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MTProto-Finder-x86_64.AppImage
