@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @StateObject private var model = ProxyModel()
+    @Environment(\.openURL) private var openURL
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -17,10 +19,14 @@ struct ContentView: View {
                 Text("SOCKS5").tag("socks5")
             }.pickerStyle(.segmented).padding(.horizontal)
             List(model.top) { p in
-                HStack {
-                    Text(p.host).font(.subheadline.bold()).lineLimit(1)
-                    Spacer()
-                    Text(p.pingText).font(.subheadline.bold()).foregroundColor(p.pingColor)
+                Button {
+                    if let url = p.tgURL { openURL(url) }
+                } label: {
+                    HStack {
+                        Text(p.host).font(.subheadline.bold()).lineLimit(1).foregroundColor(.primary)
+                        Spacer()
+                        Text(p.pingText).font(.subheadline.bold()).foregroundColor(p.pingColor)
+                    }
                 }
             }.listStyle(.plain)
             Text(model.status).font(.caption).foregroundColor(.secondary).padding(.vertical, 4)
@@ -29,7 +35,6 @@ struct ContentView: View {
                 .padding(12).background(Color.white.opacity(0.05)).cornerRadius(12).padding(.horizontal).padding(.bottom, 8)
         }
         .preferredColorScheme(.dark)
-        .onTapGesture {}
         .task { await model.start() }
     }
 }

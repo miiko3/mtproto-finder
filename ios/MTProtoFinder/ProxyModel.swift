@@ -135,7 +135,7 @@ final class ProxyModel: ObservableObject {
                     guard getaddrinfo(host, nil, &hints, &list) == 0, let first = list else {
                         close(sock); cont.resume(returning: -2); return
                     }
-                    withMemoryRebound(to: sockaddr_in.self, capacity: 1) { first.pointee.ai_addr! } { p in
+                    first.pointee.ai_addr!.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { p in
                         addr.sin_addr = p.pointee.sin_addr
                     }
                     freeaddrinfo(list)
@@ -152,7 +152,7 @@ final class ProxyModel: ObservableObject {
                     return
                 }
                 var fds = fd_set()
-                withUnsafeMutablePointer(to: &fds) { $0.pointee.__fds_bits.0 = Int(bitPattern: 1) << (sock % 32) }
+                fds.fds_bits.0 = Int32(1 << (sock % 32))
                 var tv = timeval(tv_sec: 2, tv_usec: 0)
                 let sel = withUnsafeMutablePointer(to: &fds) {
                     select(sock + 1, nil, $0, nil, &tv)
@@ -179,7 +179,7 @@ final class ProxyModel: ObservableObject {
                 fdset.__fds_bits.0 = Int(clamping: 1 << sock % 32)
                 _ = fdset
                 var fds = fd_set()
-                withUnsafeMutablePointer(to: &fds) { $0.pointee.__fds_bits.0 = Int(bitPattern: 1) << (sock % 32) }
+                fds.fds_bits.0 = Int32(1 << (sock % 32))
                 var tv = timeval(tv_sec: 2, tv_usec: 0)
                 let sel = withUnsafeMutablePointer(to: &fds) {
                     select(sock + 1, nil, $0, nil, &tv)
