@@ -220,7 +220,7 @@ loadPrefs();
 rootView=new LinearLayout(this);rootView.setOrientation(LinearLayout.VERTICAL);rootView.setPadding(dp(12),dp(16),dp(12),dp(8));
 LinearLayout head=new LinearLayout(this);head.setOrientation(LinearLayout.HORIZONTAL);head.setGravity(Gravity.CENTER_VERTICAL);
 title=new TextView(this);title.setText("⚡ MTProto Finder");title.setTextSize(18);title.setTypeface(null,Typeface.BOLD);title.setSingleLine(true);
-sub=new TextView(this);sub.setText("  v0.1.1.3");sub.setTextSize(11);sub.setTypeface(null,Typeface.BOLD);
+sub=new TextView(this);sub.setText("  v0.1.1.4");sub.setTextSize(11);sub.setTypeface(null,Typeface.BOLD);
 LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f);
 LinearLayout tw=new LinearLayout(this);tw.setOrientation(LinearLayout.HORIZONTAL);tw.setGravity(Gravity.CENTER_VERTICAL);tw.setLayoutParams(sp);tw.addView(title);tw.addView(sub);
 authorBtn=mkBtn("👤 @yetilov",0,0xFF58A6FF);authorBtn.setOnClickListener(v->open(AUTHOR_URL));
