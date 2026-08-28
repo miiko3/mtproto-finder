@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">#B00D1117</item>
+        <item name="android:statusBarColor">#B00D1117</item>
+        <item name="android:navigationBarColor">#B00D1117</item>
+        <item name="android:colorAccent">#FF1F6FEB</item>
+        <item name="android:textColorPrimary">#FFE6EDF3</item>
+        <item name="android:textColorSecondary">#FF8B949E</item>
+        <item name="android:colorControlActivated">#FF1F6FEB</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

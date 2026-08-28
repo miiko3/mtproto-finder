@@ -4,3 +4,8 @@ dist/
 AppDir/
 .venv/
 *.spec
+MTProto-Finder-x86_64.AppImage
+android/*.apk
+android/build_android_out/
+android/*.idsig
+.github/

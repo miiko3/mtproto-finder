@@ -1,0 +1,144 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	objectVersion = 56;
+	classes = {};
+	objects = {
+
+/* Begin PBXFileReference section */
+		1A000001 /* MTProtoFinderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTProtoFinderApp.swift; sourceTree = "<group>"; };
+		1A000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1A000003 /* ProxyModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyModel.swift; sourceTree = "<group>"; };
+		1A000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A000005 /* MTProtoFinder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MTProtoFinder.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1A000010 /* MTProtoFinder */ = {
+			isa = PBXGroup;
+			children = (1A000001, 1A000002, 1A000003, 1A000004);
+			path = MTProtoFinder;
+			sourceTree = "<group>";
+		};
+		1A000011 /* main */ = {
+			isa = PBXGroup;
+			children = (1A000010);
+			sourceTree = "<group>";
+		};
+		1A000012 /* Products */ = {
+			isa = PBXGroup;
+			children = (1A000005);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A000020 /* MTProtoFinder */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A000040;
+			buildPhases = (1A000030);
+			buildRules = ();
+			dependencies = ();
+			name = MTProtoFinder;
+			productName = MTProtoFinder;
+			productReference = 1A000005;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A000030 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A000031 /* MTProtoFinderApp.swift in Sources */,
+				1A000032 /* ContentView.swift in Sources */,
+				1A000033 /* ProxyModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXBuildFile section */
+		1A000031 /* MTProtoFinderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001; };
+		1A000032 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002; };
+		1A000033 /* ProxyModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000003; };
+/* End PBXBuildFile section */
+
+/* Begin PBXProject section */
+		1A000050 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { BuildIndependentTargetsInParallel = 1; };
+			buildConfigurationList = 1A000060;
+			developmentRegion = ru;
+			hasKnownIssues = 0;
+			mainGroup = 1A000011;
+			targets = (1A000020);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		1A000041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1A000042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A000040 /* Build config list for PBXNativeTarget */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (1A000041, 1A000042);
+			defaultConfigurationIsVisible = 0;
+		};
+		1A000060 /* Build config list for PBXProject */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (1A000061, 1A000062);
+			defaultConfigurationIsVisible = 0;
+		};
+		1A000061 /* Project Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; SWIFT_VERSION = 5.9; };
+			name = Debug;
+		};
+		1A000062 /* Project Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; SWIFT_VERSION = 5.9; };
+			name = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1A000050;
+}
