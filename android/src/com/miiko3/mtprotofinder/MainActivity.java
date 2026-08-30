@@ -40,10 +40,11 @@ import java.util.regex.Pattern;
 import javax.net.ssl.HttpsURLConnection;
 
 public class MainActivity extends Activity{
-static final String[]SOURCES={"https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json","https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt"};
+static final String[]SOURCES={"https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json","https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/mtproto.txt","https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt"};
 static final String[]SOCKS_SOURCES={"https://cdn.jsdelivr.net/gh/monosans/proxy-list@main/proxies/socks5.txt","https://cdn.jsdelivr.net/gh/TheSpeedX/PROXY-List@master/socks5.txt"};
 static final String AUTHOR_URL="https://t.me/yetilov";
-static final int MAX_SERVERS=30,REPING_MS=5000,RESCAN_MS=600000;
+static final int MAX_SERVERS=30,REPING_MS=5000,RESCAN_MS=600000,LOCAL_PORT=10808;
+static final String INFO_TEXT="Пинг в приложении отличается от пинга в Telegram? Все из за разности подхода к проверки его доступности.\n\nMTProto Finder предоставляет пинг (число) путем подключение мобильной/WiFi сети к серверу.\n\nА Telegram обрабатывает прокси сервер через HTTPS, то есть, чтобы установить соединение, нужно выполнить «рукопожатие» (3 пакета TCP + обмен ключами шифрования) - это занимает время и требует больше ресурсов.";
 static final Pattern LINK_RE=Pattern.compile("(server|port|secret)=([^&\\s]+)");
 static final int[]ACCENTS={0xFF1F6FEB,0xFF238636,0xFF8250DF,0xFFF85149,0xFFD29922,0xFF58A6FF};
 static final String[]ACCENT_NAMES={"Синий","Зелёный","Фиолетовый","Красный","Оранжевый","Голубой"};
@@ -107,6 +108,34 @@ String host=null,port=null,secret=null;
 while(m.find()){String k=m.group(1),v=m.group(2);if("server".equals(k))host=decode(v);else if("port".equals(k))port=decode(v);else if("secret".equals(k))secret=decode(v);}
 if(host!=null&&port!=null&&secret!=null){try{add(new Proxy(host.trim().replaceAll("\\.$",""),Integer.parseInt(port),secret),f,s);}catch(Exception ignored){}}}}
 static String decode(String s){try{return java.net.URLDecoder.decode(s,"UTF-8");}catch(Exception e){return s;}}
+static double[]handshakePing(Proxy p,double timeout){
+long t0=System.nanoTime();boolean ok=true;
+try{
+Socket s=new Socket();s.connect(new InetSocketAddress(p.host,p.port),(int)(timeout*1000));s.setSoTimeout((int)(timeout*1000));
+if("socks5".equals(p.proto)){s.getOutputStream().write(new byte[]{0x05,0x01,0x00});byte[]b=new byte[2];int n=s.getInputStream().read(b);ok=n>=2&&(b[0]&0xFF)==0x05;}
+else if(p.secret.toLowerCase().startsWith("ee")){s.getOutputStream().write(tlsHello(domainFromSecret(p.secret)));byte[]b=new byte[6];int n=s.getInputStream().read(b);ok=n>=2&&(b[0]&0xFF)==0x16;}
+else{s.getOutputStream().write(obfHead(p.secret,2));}
+s.close();
+}catch(Exception e){return new double[]{-2,0};}
+return new double[]{(System.nanoTime()-t0)/1e6,ok?1:0};}
+static byte[]obfHead(String secretHex,int dcId){
+try{
+byte[]sec=hex(secretHex.length()>=32?secretHex.substring(0,32):"0123456789abcdef0123456789abcdef");
+byte[]r=new byte[64];new java.security.SecureRandom().nextBytes(r);
+r[56]=(byte)dcId;r[57]=(byte)(dcId>>8);r[58]=0;r[59]=0;r[60]=(byte)0xEE;r[61]=(byte)0xEE;r[62]=(byte)0xEE;r[63]=(byte)0xEE;
+byte[]dk=sha256(java.util.Arrays.copyOfRange(r,8,40),sec);
+byte[]div=java.util.Arrays.copyOfRange(sha256(java.util.Arrays.copyOfRange(r,40,56),sec),0,16);
+byte[]rr=new byte[64];for(int i=0;i<64;i++)rr[i]=r[63-i];
+byte[]ek=sha256(java.util.Arrays.copyOfRange(rr,8,40),sec);
+byte[]eiv=java.util.Arrays.copyOfRange(sha256(java.util.Arrays.copyOfRange(rr,40,56),sec),0,16);
+javax.crypto.Cipher dec=javax.crypto.Cipher.getInstance("AES/CTR/NoPadding");
+dec.init(javax.crypto.Cipher.ENCRYPT_MODE,new javax.crypto.spec.SecretKeySpec(dk,"AES"),new javax.crypto.spec.IvParameterSpec(div));
+byte[]tail=java.util.Arrays.copyOfRange(r,56,64);
+byte[]et=dec.doFinal(tail);
+byte[]out=new byte[64];System.arraycopy(r,0,out,0,56);System.arraycopy(et,0,out,56,8);
+return out;
+}catch(Exception e){return new byte[64];}}
+static byte[]sha256(byte[]a,byte[]b){try{java.security.MessageDigest md=java.security.MessageDigest.getInstance("SHA-256");md.update(a);md.update(b);return md.digest();}catch(Exception e){return new byte[32];}}
 static double tcpPing(Proxy p,double timeout){
 long s=System.nanoTime();
 try{Socket sock=new Socket();sock.connect(new InetSocketAddress(p.host,p.port),(int)(timeout*1000));sock.close();return(System.nanoTime()-s)/1e6;}
@@ -175,7 +204,8 @@ String mode="mtproto";boolean manual=false,refreshPending=false,pingBusy=false,r
 ExecutorService pool=Executors.newFixedThreadPool(64);
 List<Future<?>>futures=new ArrayList<>();
 Proxy selected=null;
-LinearLayout rootView,statusRow;TextView title,sub,status,typeLbl;Button btnMt,btnFt,btnConnect,btnPing,themeBtn,settingsBtn,authorBtn;
+LinearLayout rootView,statusRow;TextView title,sub,status,typeLbl;Button btnMt,btnFt,btnConnect,btnPing,btnLocal,themeBtn,settingsBtn,authorBtn;
+LocalBridge bridge;
 ListView list;
 BaseAdapter adapter=new BaseAdapter(){
 public int getCount(){return top.size();}
@@ -220,11 +250,12 @@ loadPrefs();
 rootView=new LinearLayout(this);rootView.setOrientation(LinearLayout.VERTICAL);rootView.setPadding(dp(12),dp(16),dp(12),dp(8));
 LinearLayout head=new LinearLayout(this);head.setOrientation(LinearLayout.HORIZONTAL);head.setGravity(Gravity.CENTER_VERTICAL);
 title=new TextView(this);title.setText("⚡ MTProto Finder");title.setTextSize(18);title.setTypeface(null,Typeface.BOLD);title.setSingleLine(true);
-sub=new TextView(this);sub.setText("  v0.1.1.4");sub.setTextSize(11);sub.setTypeface(null,Typeface.BOLD);
+sub=new TextView(this);sub.setText("  v0.1.2.0");sub.setTextSize(11);sub.setTypeface(null,Typeface.BOLD);
 LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f);
 LinearLayout tw=new LinearLayout(this);tw.setOrientation(LinearLayout.HORIZONTAL);tw.setGravity(Gravity.CENTER_VERTICAL);tw.setLayoutParams(sp);tw.addView(title);tw.addView(sub);
+Button infoBtn=mkBtn("ⓘ",0,muted);infoBtn.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("О пинге").setMessage(INFO_TEXT).setPositiveButton("Понятно",null).show());
 authorBtn=mkBtn("👤 @yetilov",0,0xFF58A6FF);authorBtn.setOnClickListener(v->open(AUTHOR_URL));
-head.addView(tw);head.addView(authorBtn);
+head.addView(tw);head.addView(infoBtn);head.addView(authorBtn);
 rootView.addView(head);
 LinearLayout fr=new LinearLayout(this);fr.setOrientation(LinearLayout.HORIZONTAL);fr.setGravity(Gravity.CENTER_VERTICAL);fr.setPadding(0,dp(10),0,dp(6));
 typeLbl=new TextView(this);typeLbl.setText("ТИП:  ");typeLbl.setTextSize(11);typeLbl.setTypeface(null,Typeface.BOLD);typeLbl.setPadding(dp(2),0,dp(6),0);
@@ -240,11 +271,11 @@ list.setLayoutParams(lp);
 rootView.addView(list);
 LinearLayout bottom=new LinearLayout(this);bottom.setOrientation(LinearLayout.HORIZONTAL);bottom.setGravity(Gravity.CENTER);bottom.setPadding(dp(6),dp(10),dp(6),dp(6));
 btnConnect=mkBtn("🚀 Подключиться",0,0);btnConnect.setOnClickListener(v->{if(selected!=null){open(selected.link());toast("Открываю "+selected.host+" в Telegram");}});
-btnPing=mkBtn("🎯 Пинг выбранного",0,0);btnPing.setOnClickListener(v->toggleManual());
-LinearLayout.LayoutParams cParams=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f);cParams.setMargins(dp(4),0,dp(4),0);
-LinearLayout.LayoutParams pParams=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f);pParams.setMargins(dp(4),0,dp(4),0);
-btnConnect.setLayoutParams(cParams);btnPing.setLayoutParams(pParams);
-bottom.addView(btnConnect);bottom.addView(btnPing);
+btnPing=mkBtn("🎯 Пинг",0,0);btnPing.setOnClickListener(v->toggleManual());
+btnLocal=mkBtn("🔌 Локальный",0,0);btnLocal.setOnClickListener(v->toggleLocal());
+LinearLayout.LayoutParams cParams=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f);cParams.setMargins(dp(3),0,dp(3),0);
+btnConnect.setLayoutParams(cParams);btnPing.setLayoutParams(cParams);btnLocal.setLayoutParams(cParams);
+bottom.addView(btnConnect);bottom.addView(btnPing);bottom.addView(btnLocal);
 rootView.addView(bottom);
 status=new TextView(this);status.setText("Готов");status.setTextSize(12);status.setPadding(dp(4),dp(4),dp(4),dp(4));
 rootView.addView(status);
@@ -295,6 +326,18 @@ void setFilterUI(){tint(btnMt,"mtproto".equals(mode));tint(btnFt,"socks5".equals
 void tint(Button b,boolean on){GradientDrawable d=(GradientDrawable)b.getBackground();if(on){d.setColor(accentCur);b.setTextColor(accentFg);}else{d.setColor(dark?0x33262D:0x22000000);b.setTextColor(muted);}}
 void toast(String s){android.widget.Toast.makeText(this,s,android.widget.Toast.LENGTH_SHORT).show();}
 void open(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(Exception e){toast("Не найдено приложение для ссылки");}}
+void toggleLocal(){
+if(bridge!=null&&bridge.isRunning()){bridge.stop();bridge=null;paint(btnLocal,dark?0x33262D:0x22000000,fg);setStatus("Локальный прокси остановлен");toast("Локальный прокси остановлен");return;}
+MainActivity.Proxy best=null;
+for(Proxy p:all)if("mtproto".equals(p.proto)&&p.ping>0){if(best==null||p.ping<best.ping)best=p;}
+if(best==null){toast("Нет рабочего MTProto — подождите проверки");return;}
+final Proxy bp=best;
+bridge=new LocalBridge(LOCAL_PORT,()->bp);
+bridge.start();
+paint(btnLocal,accentCur,accentFg);
+setStatus("🔌 SOCKS5 127.0.0.1:"+LOCAL_PORT+" через "+best.host);
+toast("Прокси: 127.0.0.1:"+LOCAL_PORT);
+}
 List<Proxy>pool(){List<Proxy>r=new ArrayList<>();for(Proxy p:all)if(p.ptype().equals(mode))r.add(p);return r;}
 void setMode(String m){if(manual)toggleManual();mode=m;setFilterUI();refreshNow();savePrefs();}
  void openSettingsUnused(){
@@ -342,9 +385,11 @@ if(pingBusy||targets.isEmpty())return;
 pingBusy=true;
 for(Proxy p:targets)futures.add(pool.submit(()->{
 if(Thread.currentThread().isInterrupted())return;
-double ms=Net.tcpPing(p,2);
-boolean ok=Net.validate(p,1.5);
-if(!Thread.currentThread().isInterrupted())h.post(()->{p.ping=ms;p.valid=ok;scheduleRefresh();});
+double[]r=Net.handshakePing(p,2);
+double ms=r[0];boolean ok=r[1]==1;
+if(ms<0){ms=Net.tcpPing(p,1);ok=false;}
+final double fms=ms;final boolean fok=ok;
+if(!Thread.currentThread().isInterrupted())h.post(()->{p.ping=fms;p.valid=fok;scheduleRefresh();});
 }));
 pool.submit(()->{h.post(()->pingBusy=false);});
 }
@@ -375,13 +420,13 @@ if(!manual)return;
 if(selected==null){setStatus("Выберите сервер — пингую только его");h.postDelayed(this::manualStep,2000);return;}
 setStatus("🎯 Пингую только "+selected.host+":"+selected.port+" · остальные остановлены");
 Proxy p=selected;
-pool.submit(()->{double ms=Net.tcpPing(p,2);boolean ok=Net.validate(p,1.5);h.post(()->{p.ping=ms;p.valid=ok;scheduleRefresh();manualStep();});});
+pool.submit(()->{double[]r=Net.handshakePing(p,2);h.post(()->{p.ping=r[0];p.valid=r[1]==1||r[0]>0;scheduleRefresh();manualStep();});});
 }
 Runnable repingRun=new Runnable(){public void run(){
 if(manual)return;
 List<Proxy>un=untestedPool();
 if(!un.isEmpty())startPing(un);
-else if(!top.isEmpty())for(Proxy p:new ArrayList<>(top))pool.submit(()->{double ms=Net.tcpPing(p,2);boolean ok=Net.validate(p,1.5);h.post(()->{p.ping=ms;p.valid=ok;scheduleRefresh();});});
+else if(!top.isEmpty())for(Proxy p:new ArrayList<>(top))pool.submit(()->{double[]r=Net.handshakePing(p,2);h.post(()->{p.ping=r[0];p.valid=r[1]==1||r[0]>0;scheduleRefresh();});});
 h.postDelayed(this,REPING_MS);}};
 int pingColor(double ms){return ms<150?0xFF3FB950:(ms<400?0xFFD29922:0xFFF85149);}
 void setStatus(String s){status.setText(s);}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import json,os,re,socket,ssl,struct,subprocess,sys,time,urllib.parse,urllib.request
+from localproxy import handshake_ping,LocalBridge
 
 _SSL_CTX=None
 def ssl_context():
@@ -15,10 +16,11 @@ from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplicat
 from PyQt6.QtWidgets import QApplication,QFrame,QHBoxLayout,QHeaderView,QLabel,QMainWindow,QAbstractItemView,QDialog,QMessageBox,QPushButton,QTableWidget,QTableWidgetItem,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.2.1.5"
+APP_VERSION="1.2.2.0"
 AUTHOR_URL="https://t.me/yetilov"
 SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
+"https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/mtproto.txt",
 "https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt",
 ]
 MAX_SERVERS=30
@@ -302,16 +304,24 @@ def validate_mtproto(proxy,timeout=1.5):
         except Exception:
             return True
 
-def probe_proxy(proxy,ping_timeout=1.0,validate_timeout=1.5):
-    ping=tcp_ping_one(proxy,ping_timeout)
-    if ping<0:
+def probe_proxy(proxy,ping_timeout=2.0,validate_timeout=1.5):
+    if proxy.proto=="socks5":
+        ping,ok=handshake_ping(proxy,timeout=ping_timeout)
+        if ping<0:
+            ping=tcp_ping_one(proxy,1.0)
+            ok=False
         proxy.ping=ping
-        proxy.valid=False
+        proxy.valid=ok
         return
-    try:
-        ok=validate_mtproto(proxy,validate_timeout)
-    except Exception:
-        ok=True
+    if proxy.ping!=-1.0 and proxy.valid:
+        ping=tcp_ping_one(proxy,1.0)
+        proxy.ping=ping if ping>0 else ping
+        proxy.valid=ping>0
+        return
+    ping,ok=handshake_ping(proxy,timeout=ping_timeout)
+    if ping<0:
+        ping=tcp_ping_one(proxy,1.0)
+        ok=ping>0
     proxy.ping=ping
     proxy.valid=ok
 
@@ -374,9 +384,15 @@ def muted_color(mode):
     return"#8b949e" if mode=="dark" else"#57606a"
 
 class MainWindow(QMainWindow):
+    INFO_TEXT=("Пинг в приложении отличается от пинга в Telegram? Все из за разности подхода к проверки его доступности.\n\n"
+"MTProto Finder предоставляет пинг (число) путем подключение мобильной/WiFi сети к серверу.\n\n"
+"А Telegram обрабатывает прокси сервер через HTTPS, то есть, чтобы установить соединение, нужно выполнить «рукопожатие» (3 пакета TCP + обмен ключами шифрования) - это занимает время и требует больше ресурсов.")
+
     def __init__(self):
         super().__init__()
         self.cfg=load_config()
+        self.bridge=LocalBridge()
+        self._bridge_pick=None
         self.all_proxies=[]
         self.top=[]
         self.scan_thread=None
@@ -426,6 +442,12 @@ class MainWindow(QMainWindow):
         ver.setObjectName("ver")
         bar.addWidget(ver)
         bar.addStretch()
+        self.info_btn=QPushButton("ⓘ")
+        self.info_btn.setObjectName("round")
+        self.info_btn.setFixedSize(34,34)
+        self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.info_btn.clicked.connect(self.show_info)
+        bar.addWidget(self.info_btn)
         self.theme_btn=QPushButton("◐")
         self.theme_btn.setObjectName("round")
         self.theme_btn.setFixedSize(34,34)
@@ -517,6 +539,12 @@ class MainWindow(QMainWindow):
         self.ping_btn.clicked.connect(self.toggle_manual_ping)
         bottom.addWidget(self.connect_btn)
         bottom.addWidget(self.ping_btn)
+        self.local_btn=QPushButton("🔌 Локальный прокси")
+        self.local_btn.setObjectName("ghost")
+        self.local_btn.setCheckable(True)
+        self.local_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.local_btn.clicked.connect(self.toggle_local)
+        bottom.addWidget(self.local_btn)
         bottom.addStretch()
         bottom_wrap=QWidget()
         bottom_wrap.setLayout(bottom)
@@ -566,10 +594,6 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self,e):
         super().resizeEvent(e)
-        if not hasattr(self,"_blur_t"):
-            self._blur_t=QTimer(self,interval=60,timeout=lambda:apply_blur(self,24))
-            self._blur_t.setSingleShot(True)
-        self._blur_t.start()
 
     def _apply_style(self):
         dark=(self.theme_mode()=="dark")
@@ -580,7 +604,7 @@ class MainWindow(QMainWindow):
         a_border=f"rgba({a.red()},{a.green()},{a.blue()},130)"
         if dark:
             fg="#eef2f7"; muted="#9aa6b2"; line="rgba(255,255,255,40)"
-            glass="rgba(20,24,33,140)"
+            glass="#141821"
             solid="#161b22"
             border=a_border
             hover="rgba(255,255,255,28)"
@@ -590,7 +614,7 @@ class MainWindow(QMainWindow):
             host_c="#79c0ff"; tls_c="#a371f7"
         else:
             fg="#1c2128"; muted="#57606a"; line="rgba(0,0,0,40)"
-            glass="rgba(245,247,250,150)"
+            glass="#f5f7fa"
             solid="#f6f8fa"
             border=a_border
             hover="rgba(0,0,0,28)"
@@ -668,6 +692,28 @@ class MainWindow(QMainWindow):
             w.setStyleSheet(qss)
         self._host_color=host_c
         self._tls_color=tls_c
+
+    def show_info(self):
+        QMessageBox.information(self,"О пинге",self.INFO_TEXT)
+
+    def toggle_local(self):
+        if self.local_btn.isChecked():
+            cand=[p for p in self.all_proxies if p.proto=="mtproto" and p.ping>0]
+            cand.sort(key=lambda p:p.ping)
+            p=cand[0] if cand else None
+            if p is None:
+                self.local_btn.setChecked(False)
+                QMessageBox.warning(self,APP_NAME,"Нет рабочего MTProto-прокси для моста — подождите проверки.")
+                return
+            self.bridge.pick=lambda pp=p:pp
+            self.bridge.start()
+            self._bridge_pick=p
+            self.local_btn.setText(f"🔌 Локальный прокси :{self.bridge.port}")
+            self.set_status(f"🔌 Локальный SOCKS5 на 127.0.0.1:{self.bridge.port} через {p.host}")
+        else:
+            self.bridge.stop()
+            self.local_btn.setText("🔌 Локальный прокси")
+            self.set_status("Локальный прокси остановлен")
 
     def open_author(self):
         subprocess.Popen(["xdg-open",AUTHOR_URL])
@@ -950,8 +996,6 @@ def main():
     app.setWindowIcon(QIcon(LOGO))
     win=MainWindow()
     win.show()
-    apply_blur(win,24)
-    QTimer.singleShot(120,lambda:apply_blur(win,24))
     sys.exit(app.exec())
 
 if __name__=="__main__":
