@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplicat
 from PyQt6.QtWidgets import QApplication,QFrame,QHBoxLayout,QHeaderView,QLabel,QMainWindow,QAbstractItemView,QDialog,QMessageBox,QPushButton,QTableWidget,QTableWidgetItem,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.2.2.0"
+APP_VERSION="1.2.2.1"
 AUTHOR_URL="https://t.me/yetilov"
 SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -710,6 +710,7 @@ class MainWindow(QMainWindow):
             self._bridge_pick=p
             self.local_btn.setText(f"🔌 Локальный прокси :{self.bridge.port}")
             self.set_status(f"🔌 Локальный SOCKS5 на 127.0.0.1:{self.bridge.port} через {p.host}")
+            subprocess.Popen(["xdg-open",f"tg://socks?server=127.0.0.1&port={self.bridge.port}"])
         else:
             self.bridge.stop()
             self.local_btn.setText("🔌 Локальный прокси")
