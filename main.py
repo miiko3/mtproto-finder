@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import json,os,re,socket,ssl,struct,subprocess,sys,time,urllib.parse,urllib.request
-from localproxy import handshake_ping,LocalBridge
+import base64,json,os,re,socket,ssl,struct,subprocess,sys,time,urllib.parse,urllib.request
+from localproxy import handshake_ping,LocalBridge,LOCAL_SECRET
 
 _SSL_CTX=None
 def ssl_context():
@@ -13,19 +13,37 @@ from concurrent.futures import ThreadPoolExecutor,as_completed
 from dataclasses import dataclass
 from PyQt6.QtCore import Qt,QThread,pyqtSignal,QTimer
 from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplication,QPalette
-from PyQt6.QtWidgets import QApplication,QFrame,QHBoxLayout,QHeaderView,QLabel,QMainWindow,QAbstractItemView,QDialog,QMessageBox,QPushButton,QTableWidget,QTableWidgetItem,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout
+from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.2.2.1"
+APP_VERSION="1.4.0"
 AUTHOR_URL="https://t.me/yetilov"
-SOURCES=[
+MT_SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/mtproto.txt",
 "https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt",
+"https://cdn.jsdelivr.net/gh/MhdiTaheri/ProxyCollector@main/proxy.txt",
+"https://cdn.jsdelivr.net/gh/SoliSpirit/mtproto@master/all_proxies.txt",
+"https://cdn.jsdelivr.net/gh/Chumbayoumba/free-telegram-proxy-russia-2026@main/proxy-list.txt",
+"https://cdn.jsdelivr.net/gh/horizonpaz-create/mtproto-live@main/mtproto.txt",
 ]
-MAX_SERVERS=30
-REPING_INTERVAL=5
+SOCKS_SOURCES=[
+"https://cdn.jsdelivr.net/gh/monosans/proxy-list@main/proxies/socks5.txt",
+"https://cdn.jsdelivr.net/gh/TheSpeedX/PROXY-List@master/socks5.txt",
+"https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
+"https://cdn.jsdelivr.net/gh/roosterkid/openproxylist@main/SOCKS5_RAW.txt",
+"https://cdn.jsdelivr.net/gh/zloi-user/hideip.me@main/socks5.txt",
+"https://cdn.jsdelivr.net/gh/casals-ar/proxy-list@main/socks5",
+"https://cdn.jsdelivr.net/gh/ShiftyTR/Proxy-List@master/socks5.txt",
+"https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/SOCKS5.txt",
+]
+SOURCES=MT_SOURCES
+MAX_SERVERS=32
+REPING_INTERVAL=6
 RESCAN_INTERVAL=600
+LOCAL_PROXY_PORT=10811
+VPN_SOCKS_PORT=10808
+VPN_HTTP_PORT=10809
 LINK_RE=re.compile(r"(server|port|secret)=([^&\s]+)")
 
 CONFIG_DIR=os.path.join(os.path.expanduser("~"),".config")
@@ -69,18 +87,6 @@ class Proxy:
     proto:str="mtproto"
 
     @property
-    def ptype(self):
-        return self.proto
-
-    @property
-    def type_label(self):
-        return"SOCKS5" if self.proto=="socks5" else("Fake TLS" if self.ptype2=="faketls" else"MTProto")
-
-    @property
-    def ptype2(self):
-        return"faketls" if self.secret.lower().startswith("ee") else"mtproto"
-
-    @property
     def tg_link(self):
         if self.proto=="socks5":
             user,_,pwd=self.secret.partition(":")
@@ -90,14 +96,45 @@ class Proxy:
             return link
         return"tg://proxy?server={}&port={}&secret={}".format(self.host,self.port,urllib.parse.quote(self.secret,safe=""))
 
-SOCKS_RE=re.compile(r"^(socks5|socks)://([^:@\s]+):([^@\s]+)@([\w.\-]+):(\d+)$")
-
 def parse_socks_line(line):
-    m=SOCKS_RE.match(line.strip())
+    s=line.strip()
+    if not s or s.startswith("#"):
+        return None
+    cred=""
+    if "://" in s:
+        scheme,_,s=s.partition("://")
+        if scheme.lower()not in("socks5","socks"):
+            return None
+    if"@"in s:
+        cred,_,s=s.rpartition("@")
+    s=s.split("|")[0]
+    m=re.match(r"^([\w.\-]+):(\d{1,5})(?::|$)",s)
     if not m:
         return None
-    user,pwd,host,port=m.group(1),m.group(2),m.group(3),int(m.group(4))
-    return Proxy(host,port,user+":"+pwd,proto="socks5")
+    host,port=m.group(1),int(m.group(2))
+    if not(0<port<65536):
+        return None
+    return Proxy(host,port,cred,proto="socks5")
+
+def normalize_secret(sec):
+    s=sec.strip()
+    if not s:
+        return None
+    try:
+        b=bytes.fromhex(s)
+        if len(b)>=16:
+            return s.lower()
+    except ValueError:
+        pass
+    if s.lower().startswith("ee"):
+        tail=s[2:]
+        try:
+            raw=base64.urlsafe_b64decode(tail+"="*(-len(tail)%4))
+        except Exception:
+            return None
+        if len(raw)>=16 and all(32<=c<127 for c in raw[16:64]):
+            return"ee"+raw[:16].hex()+raw[16:].hex()
+    return None
 
 def parse_proxy_link(link):
     if"server="not in link or"port="not in link:
@@ -106,15 +143,51 @@ def parse_proxy_link(link):
     try:
         host=urllib.parse.unquote(params["server"]).rstrip(".")
         port=int(params["port"])
-        secret=urllib.parse.unquote(params.get("secret",""))
+        secret=normalize_secret(urllib.parse.unquote(params.get("secret","")))
         if not host or not secret:
             return None
         return Proxy(host,port,secret)
     except(KeyError,ValueError):
         return None
 
+def _vpn_http_proxy():
+    try:
+        s = socket.create_connection(("127.0.0.1", VPN_HTTP_PORT), timeout=0.5)
+        s.close()
+        return "http://127.0.0.1:{}".format(VPN_HTTP_PORT)
+    except OSError:
+        return None
+
+
+def _vpn_socks_up():
+    try:
+        s = socket.create_connection(("127.0.0.1", VPN_SOCKS_PORT), timeout=0.5)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _fetch_via_vpn(url):
+    proxy = _vpn_http_proxy()
+    if not proxy:
+        return None
+    try:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+        with opener.open(req, timeout=15) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+
+
 def _fetch_source(url):
-    parsed=urllib.parse.urlparse(url)
+    text = _fetch_via_vpn(url)
+    if text is not None:
+        return url, text
+    parsed = urllib.parse.urlparse(url)
     try:
         host=parsed.hostname
         port=parsed.port or(443 if parsed.scheme=="https"else 80)
@@ -169,15 +242,10 @@ def _parse_source(url,text):
                 parsed.append(p)
     return parsed
 
-SOCKS_SOURCES=[
-"https://cdn.jsdelivr.net/gh/monosans/proxy-list@main/proxies/socks5.txt",
-"https://cdn.jsdelivr.net/gh/TheSpeedX/PROXY-List@master/socks5.txt",
-]
-
 def fetch_proxies():
     found,seen=[],set()
-    pool=ThreadPoolExecutor(max_workers=len(SOURCES)+len(SOCKS_SOURCES))
     urls=list(SOURCES)+list(SOCKS_SOURCES)
+    pool=ThreadPoolExecutor(max_workers=len(urls))
     try:
         futures=[pool.submit(_fetch_source,url)for url in urls]
         for fut in as_completed(futures):
@@ -185,25 +253,11 @@ def fetch_proxies():
             if not text:
                 continue
             if url in SOCKS_SOURCES:
-                for line in text.splitlines():
-                    line=line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "://" in line:
-                        p=parse_socks_line(line)
-                    else:
-                        parts=line.replace("|",":").replace(" ",":").split(":")
-                        p=None
-                        if len(parts)>=2:
-                            try:
-                                p=Proxy(parts[-2],int(parts[-1]),"",proto="socks5")
-                            except ValueError:
-                                p=None
-                    if p and(p.host,p.port)not in seen:
-                        seen.add((p.host,p.port));found.append(p)
-                continue
-            for p in _parse_source(url,text):
-                if(p.host,p.port)not in seen:
+                parsed=[parse_socks_line(l)for l in text.splitlines()]
+            else:
+                parsed=_parse_source(url,text)
+            for p in parsed:
+                if p and(p.host,p.port)not in seen:
                     seen.add((p.host,p.port));found.append(p)
     finally:
         pool.shutdown(wait=False,cancel_futures=True)
@@ -234,96 +288,71 @@ def tcp_ping_one(proxy,timeout=1.0):
         return-2.0
 
 def _extract_domain(secret):
-    raw=secret
-    if not raw.lower().startswith("ee") or len(raw)<4:
+    h=secret.lower()
+    if not h.startswith("ee") or len(h)<36:
         return"www.cloudflare.com"
-    try:
-        out=""
-        i=2
-        while i+1<len(raw):
-            ch=bytes.fromhex(raw[i:i+2]).decode("ascii","ignore")
+    offsets=[34]+[o for o in range(2,min(64,len(h)-6),2) if o!=34]
+    for off in offsets:
+        out="";i=off;clean=True
+        while i+1<len(h):
+            try:
+                b=bytes.fromhex(h[i:i+2])
+            except ValueError:
+                clean=False
+                break
+            ch=b.decode("ascii","ignore")
             if not(ch.isalnum() or ch in".-"):
                 break
             out+=ch
             i+=2
-        out=out.strip(".")
-        if out and"." in out:
+        if clean and len(out)>=4 and out.count(".")>=1 and not out.replace(".","").isdigit():
             return out
-    except Exception:
-        pass
     return"www.cloudflare.com"
 
-def _tls_client_hello(proxy):
-    host=_extract_domain(proxy.secret).encode()
+def _sni_candidates(proxy):
+    out=[]
+    for d in(_extract_domain(proxy.secret),proxy.host,"www.cloudflare.com"):
+        d=(d or"").strip(".")
+        if d and"." in d and d not in out:
+            out.append(d)
+    return out
+
+def _tls_client_hello(proxy,host=None):
+    host=(host or _extract_domain(proxy.secret)).encode()
     name_entry=struct.pack("!B",0x00)+struct.pack("!H",len(host))+host
     sni_list=struct.pack("!H",len(name_entry))+name_entry
-    sni_ext=struct.pack("!H",0x0000)+struct.pack("!H",len(sni_list))+sni_list
-    ciphers=struct.pack("!H",0x1301)+struct.pack("!H",0x1302)+struct.pack("!H",0x1303)+struct.pack("!H",0x009c)+struct.pack("!H",0x0035)
+    ext_sni=struct.pack("!H",0x0000)+struct.pack("!H",len(sni_list))+sni_list
+    groups=struct.pack("!HHHH",0x001d,0x0017,0x0018,0x0019)
+    ext_groups=struct.pack("!HH",0x000a,len(groups)+2)+struct.pack("!H",len(groups))+groups
+    ext_epf=struct.pack("!HH",0x000b,2)+b"\x01\x00"
+    sigalgs=struct.pack("!8H",0x0403,0x0804,0x0401,0x0503,0x0805,0x0501,0x0806,0x0601)
+    ext_sig=struct.pack("!HH",0x000d,len(sigalgs)+2)+struct.pack("!H",len(sigalgs))+sigalgs
+    vers=struct.pack("!HH",0x0304,0x0303)
+    ext_vers=struct.pack("!HH",0x002b,len(vers)+1)+struct.pack("!B",len(vers))+vers
+    xkey=os.urandom(32)
+    entry=struct.pack("!HH",0x001d,len(xkey))+xkey
+    ext_ks=struct.pack("!HH",0x0033,len(entry)+2)+struct.pack("!H",len(entry))+entry
+    ext_ticket=struct.pack("!HH",0x0023,0)
+    ciphers=struct.pack("!16H",0x1301,0x1302,0x1303,0xc02b,0xc02f,0xc02c,0xc030,0xcca9,0xcca8,0xc013,0xc014,0x009c,0x009d,0x002f,0x0035,0x000a)
     cipher_list=struct.pack("!H",len(ciphers))+ciphers
-    body=struct.pack("!H",0x0303)+b"\x00"*32
-    body+=struct.pack("!B",0)
+    exts=ext_sni+ext_groups+ext_epf+ext_sig+ext_vers+ext_ks+ext_ticket
+    body=struct.pack("!H",0x0303)+os.urandom(32)
+    body+=struct.pack("!B",32)+os.urandom(32)
     body+=cipher_list
     body+=struct.pack("!B",0x01)+b"\x00"
-    body+=struct.pack("!H",len(sni_ext))+sni_ext
+    body+=struct.pack("!H",len(exts))+exts
     handshake=struct.pack("!B",0x01)+struct.pack("!I",len(body))[1:]+body
     return struct.pack("!B",0x16)+struct.pack("!H",0x0301)+struct.pack("!H",len(handshake))+handshake
 
-def validate_mtproto(proxy,timeout=1.5):
-    if proxy.ptype=="faketls":
-        try:
-            ip=_resolve(proxy.host)
-            if not ip:
-                return False
-            s=socket.create_connection((ip,proxy.port),timeout=timeout)
-            s.settimeout(timeout)
-            s.sendall(_tls_client_hello(proxy))
-            d=s.recv(6)
-            s.close()
-            return len(d)>=2 and d[0]==0x16
-        except(ConnectionRefusedError,OSError):
-            return False
-        except Exception:
-            return True
-    else:
-        try:
-            secret=bytes.fromhex(proxy.secret)
-        except Exception:
-            return False
-        try:
-            ip=_resolve(proxy.host)
-            if not ip:
-                return False
-            s=socket.create_connection((ip,proxy.port),timeout=timeout)
-            s.settimeout(timeout)
-            s.sendall(b"\xee"+secret)
-            d=s.recv(4)
-            s.close()
-            return len(d)>=1 and d[0]==0xee
-        except(ConnectionRefusedError,OSError):
-            return False
-        except Exception:
-            return True
-
-def probe_proxy(proxy,ping_timeout=2.0,validate_timeout=1.5):
-    if proxy.proto=="socks5":
-        ping,ok=handshake_ping(proxy,timeout=ping_timeout)
-        if ping<0:
-            ping=tcp_ping_one(proxy,1.0)
-            ok=False
-        proxy.ping=ping
-        proxy.valid=ok
-        return
-    if proxy.ping!=-1.0 and proxy.valid:
-        ping=tcp_ping_one(proxy,1.0)
-        proxy.ping=ping if ping>0 else ping
-        proxy.valid=ping>0
-        return
+def probe_proxy(proxy,ping_timeout=2.5,validate_timeout=2.0):
     ping,ok=handshake_ping(proxy,timeout=ping_timeout)
-    if ping<0:
-        ping=tcp_ping_one(proxy,1.0)
-        ok=ping>0
-    proxy.ping=ping
-    proxy.valid=ok
+    if ok and ping>0:
+        proxy.ping=ping
+        proxy.valid=True
+        return
+    tcp=tcp_ping_one(proxy,1.2)
+    proxy.ping=-2.0 if tcp<0 else tcp
+    proxy.valid=False
 
 class ScanThread(QThread):
     finished_scan=pyqtSignal(list)
@@ -339,7 +368,7 @@ class ScanThread(QThread):
 class PingThread(QThread):
     one_done=pyqtSignal(object,float)
 
-    def __init__(self,proxies,timeout=1.0):
+    def __init__(self,proxies,timeout=2.5):
         super().__init__()
         self.proxies=proxies
         self.timeout=timeout
@@ -364,7 +393,7 @@ def system_accent():
     try:
         return QApplication.palette().color(QPalette.ColorRole.Highlight)
     except Exception:
-        return QColor("#1f6feb")
+        return QColor("#c586c0")
 
 def is_system_dark():
     try:
@@ -380,32 +409,94 @@ def is_system_dark():
     except Exception:
         return True
 
-def muted_color(mode):
-    return"#8b949e" if mode=="dark" else"#57606a"
+class ProxyCard(QFrame):
+    def __init__(self,win,proxy):
+        super().__init__()
+        self.win=win
+        self.proxy=proxy
+        self.setObjectName("pcard")
+        self.setFixedHeight(44)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        lay=QHBoxLayout(self)
+        lay.setContentsMargins(16,0,8,0)
+        lay.setSpacing(8)
+        self.host_lbl=QLabel()
+        self.host_lbl.setObjectName("phost")
+        lay.addWidget(self.host_lbl,1)
+        self.badge=QLabel("…")
+        self.badge.setObjectName("badge")
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge.setMinimumWidth(76)
+        lay.addWidget(self.badge)
+        self._avail=220
+        self.refresh()
+
+    def set_avail(self,avail):
+        if avail==self._avail:
+            return
+        self._avail=avail
+        self.refresh()
+
+    def refresh(self):
+        p=self.proxy
+        if p.valid and p.ping>0:
+            ms=p.ping
+            st="good" if ms<300 else("mid" if ms<1000 else"bad")
+            text=f"{ms:.0f} ms"
+        elif p.ping==-1.0:
+            st,text="test","…"
+        elif p.ping>0:
+            st,text="dead","✖"
+        else:
+            st,text="dead","—"
+        if self.badge.property("st")!=st:
+            self.badge.setProperty("st",st)
+            s=self.badge.style()
+            s.unpolish(self.badge)
+            s.polish(self.badge)
+        self.badge.setText(text)
+        self.host_lbl.setText(self.fontMetrics().elidedText(f"{p.host}:{p.port}",Qt.TextElideMode.ElideMiddle,self._avail))
+        sel=self.proxy is self.win.selected
+        if self.property("sel")!=sel:
+            self.setProperty("sel",sel)
+            s=self.style()
+            s.unpolish(self)
+            s.polish(self)
+
+    def mousePressEvent(self,e):
+        if e.button()==Qt.MouseButton.LeftButton:
+            self.win.select(self.proxy)
+
+    def mouseDoubleClickEvent(self,e):
+        self.win.connect_proxy()
 
 class MainWindow(QMainWindow):
-    INFO_TEXT=("Пинг в приложении отличается от пинга в Telegram? Все из за разности подхода к проверки его доступности.\n\n"
-"MTProto Finder предоставляет пинг (число) путем подключение мобильной/WiFi сети к серверу.\n\n"
-"А Telegram обрабатывает прокси сервер через HTTPS, то есть, чтобы установить соединение, нужно выполнить «рукопожатие» (3 пакета TCP + обмен ключами шифрования) - это занимает время и требует больше ресурсов.")
+    INFO_TEXT=("Пинг считается по-честному: приложение делает полноценное рукопожатие с сервером —\n"
+"для MTProto это реальный запрос req_pq_multi к прокси и ответ Telegram-DC, для SOCKS5 — полный CONNECT, для FakeTLS — TLS ClientHello.\n\n"
+"Значит цветной бейдж получают только те серверы, которые реально работают с Telegram:\n"
+"• зелёный — до 300 мс\n• жёлтый — до 1000 мс\n• красный — больше\n• серый ✖ — TCP отвечает, но MTProto-рукопожатие не прошло: такой прокси в Telegram работать не будет.\n\n"
+"Список обновляется каждые {} с, полный пересканирование источников — каждые {} с.").format(REPING_INTERVAL,RESCAN_INTERVAL//60)
 
     def __init__(self):
         super().__init__()
         self.cfg=load_config()
-        self.bridge=LocalBridge()
+        self.bridge=LocalBridge(LOCAL_PROXY_PORT)
         self._bridge_pick=None
         self.all_proxies=[]
         self.top=[]
+        self.cards={}
+        self.selected=None
         self.scan_thread=None
         self.ping_thread=None
         self.no_internet=False
-        self._refresh_pending=False
         self._rescan_scheduled=False
         self.mode="mtproto"
         self.manual_mode=False
         self._drag_pos=None
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setWindowIcon(QIcon(LOGO))
-        self.resize(780,600)
+        self.resize(740,780)
+        self.setMinimumSize(600,540)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._build_ui()
@@ -420,61 +511,54 @@ class MainWindow(QMainWindow):
         root_widget.setObjectName("central")
         self.setCentralWidget(root_widget)
         outer=QVBoxLayout(root_widget)
-        outer.setContentsMargins(0,0,0,0)
+        outer.setContentsMargins(14,14,14,14)
+        outer.setSpacing(10)
 
         card=QFrame()
         card.setObjectName("glass")
         body=QVBoxLayout(card)
-        body.setContentsMargins(20,12,20,16)
-        body.setSpacing(12)
+        body.setContentsMargins(12,12,12,12)
+        body.setSpacing(10)
         outer.addWidget(card)
 
         bar=QHBoxLayout()
-        bar.setSpacing(10)
+        bar.setSpacing(8)
+        chip=QFrame()
+        chip.setObjectName("chip")
+        chip_l=QHBoxLayout(chip)
+        chip_l.setContentsMargins(8,6,16,6)
+        chip_l.setSpacing(10)
         icon=QLabel()
         icon.setObjectName("logo")
-        icon.setPixmap(QPixmap(LOGO).scaled(34,34,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
-        bar.addWidget(icon)
+        icon.setPixmap(QPixmap(LOGO).scaled(38,38,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        chip_l.addWidget(icon)
+        col=QVBoxLayout()
+        col.setSpacing(0)
         title=QLabel(APP_NAME)
         title.setObjectName("title")
-        bar.addWidget(title)
         ver=QLabel(f"v{APP_VERSION}")
         ver.setObjectName("ver")
-        bar.addWidget(ver)
+        col.addWidget(title)
+        col.addWidget(ver)
+        chip_l.addLayout(col)
+        bar.addWidget(chip)
         bar.addStretch()
-        self.info_btn=QPushButton("ⓘ")
-        self.info_btn.setObjectName("round")
-        self.info_btn.setFixedSize(34,34)
-        self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.info_btn.clicked.connect(self.show_info)
-        bar.addWidget(self.info_btn)
-        self.theme_btn=QPushButton("◐")
-        self.theme_btn.setObjectName("round")
-        self.theme_btn.setFixedSize(34,34)
-        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_btn.clicked.connect(self.cycle_theme)
-        bar.addWidget(self.theme_btn)
-        self.settings_btn=QPushButton("⚙")
-        self.settings_btn.setObjectName("round")
-        self.settings_btn.setFixedSize(34,34)
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.clicked.connect(self.open_settings)
-        bar.addWidget(self.settings_btn)
-        self.author_btn=QPushButton("@yetilov")
-        self.author_btn.setObjectName("link")
-        self.author_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.author_btn.clicked.connect(self.open_author)
-        bar.addWidget(self.author_btn)
-        self.min_btn=QPushButton("—")
-        self.min_btn.setObjectName("win")
-        self.min_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.min_btn.clicked.connect(self.showMinimized)
-        bar.addWidget(self.min_btn)
-        self.close_btn=QPushButton("✕")
-        self.close_btn.setObjectName("win")
-        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.clicked.connect(self.close)
-        bar.addWidget(self.close_btn)
+
+        def rbtn(text,slot,tip,name="round"):
+            b=QPushButton(text)
+            b.setObjectName(name)
+            b.setFixedSize(44,44)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            bar.addWidget(b)
+            return b
+
+        self.info_btn=rbtn("?",self.show_info,"Как считается пинг")
+        self.settings_btn=rbtn("⚙",self.open_settings,"Настройки")
+        self.author_btn=rbtn("✈",self.open_author,"Автор @yetilov")
+        self.min_btn=rbtn("—",self.showMinimized,"Свернуть","win")
+        self.close_btn=rbtn("✕",self.close,"Закрыть","win")
         bar_widget=QWidget()
         bar_widget.setObjectName("bar")
         bar_widget.setLayout(bar)
@@ -484,10 +568,7 @@ class MainWindow(QMainWindow):
         body.addWidget(bar_widget)
 
         seg=QHBoxLayout()
-        seg.setSpacing(8)
-        lbl=QLabel("ТИП")
-        lbl.setObjectName("cap")
-        seg.addWidget(lbl)
+        seg.addStretch()
         self.btn_mtproto=QPushButton("MTProto")
         self.btn_socks=QPushButton("SOCKS5")
         for b in(self.btn_mtproto,self.btn_socks):
@@ -498,61 +579,65 @@ class MainWindow(QMainWindow):
         self.btn_mtproto.clicked.connect(lambda:self.set_mode("mtproto"))
         self.btn_socks.clicked.connect(lambda:self.set_mode("socks5"))
         seg.addWidget(self.btn_mtproto)
+        seg.addSpacing(10)
         seg.addWidget(self.btn_socks)
         seg.addStretch()
-        self.hint=QLabel("")
-        self.hint.setObjectName("cap")
-        seg.addWidget(self.hint)
         seg_wrap=QWidget()
         seg_wrap.setLayout(seg)
         body.addWidget(seg_wrap)
 
-        self.table=QTableWidget(0,4)
-        self.table.setObjectName("table")
-        self.table.setHorizontalHeaderLabels(["#","Сервер","Порт","Пинг"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.verticalHeader().setDefaultSectionSize(38)
-        self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setColumnWidth(2,90)
-        self.table.setColumnWidth(3,120)
-        self.table.doubleClicked.connect(self.connect_proxy)
-        self.table.itemSelectionChanged.connect(lambda:self.connect_btn.setEnabled(self.table.currentRow()>=0))
-        QShortcut(QKeySequence(Qt.Key.Key_Return),self.table,activated=self.connect_selected)
-        body.addWidget(self.table,1)
+        self.list=QScrollArea()
+        self.list.setObjectName("list")
+        self.list.setWidgetResizable(True)
+        self.list.setFrameShape(QFrame.Shape.NoFrame)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.viewport().setAutoFillBackground(False)
+        self.grid_w=QWidget()
+        self.grid_w.setObjectName("gridw")
+        self.grid_lay=QGridLayout(self.grid_w)
+        self.grid_lay.setContentsMargins(2,2,10,2)
+        self.grid_lay.setHorizontalSpacing(10)
+        self.grid_lay.setVerticalSpacing(10)
+        self.grid_lay.setColumnStretch(0,1)
+        self.grid_lay.setColumnStretch(1,1)
+        self.list.setWidget(self.grid_w)
+        body.addWidget(self.list,1)
 
-        bottom=QHBoxLayout()
-        bottom.setSpacing(10)
-        self.connect_btn=QPushButton("🚀 Подключиться к Telegram")
-        self.connect_btn.setObjectName("primary")
-        self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.connect_btn.setEnabled(False)
-        self.connect_btn.clicked.connect(self.connect_selected)
-        self.ping_btn=QPushButton("🎯 Пинг выбранного")
-        self.ping_btn.setObjectName("ghost")
-        self.ping_btn.setCheckable(True)
-        self.ping_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.ping_btn.clicked.connect(self.toggle_manual_ping)
-        bottom.addWidget(self.connect_btn)
-        bottom.addWidget(self.ping_btn)
-        self.local_btn=QPushButton("🔌 Локальный прокси")
-        self.local_btn.setObjectName("ghost")
-        self.local_btn.setCheckable(True)
-        self.local_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.local_btn.clicked.connect(self.toggle_local)
-        bottom.addWidget(self.local_btn)
-        bottom.addStretch()
-        bottom_wrap=QWidget()
-        bottom_wrap.setLayout(bottom)
-        body.addWidget(bottom_wrap)
+        self.empty_lbl=QLabel("🔍 Ищу рабочие прокси…")
+        self.empty_lbl.setObjectName("empty")
+        self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.status_lbl=QLabel("Готов")
         self.status_lbl.setObjectName("status")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         body.addWidget(self.status_lbl)
+
+        dock=QFrame()
+        dock.setObjectName("dock")
+        bottom=QHBoxLayout(dock)
+        bottom.setContentsMargins(8,8,8,8)
+        bottom.setSpacing(10)
+        self.connect_btn=QPushButton("Подключиться")
+        self.connect_btn.setObjectName("primary")
+        self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.clicked.connect(self.connect_proxy)
+        self.ping_btn=QPushButton("Пинг")
+        self.ping_btn.setObjectName("pill")
+        self.ping_btn.setCheckable(True)
+        self.ping_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ping_btn.clicked.connect(self.toggle_manual_ping)
+        self.local_btn=QPushButton("Локальный прокси")
+        self.local_btn.setObjectName("pill")
+        self.local_btn.setCheckable(True)
+        self.local_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.local_btn.clicked.connect(self.toggle_local)
+        bottom.addWidget(self.connect_btn,1)
+        bottom.addWidget(self.ping_btn,1)
+        bottom.addWidget(self.local_btn,1)
+        body.addWidget(dock)
+
+        QShortcut(QKeySequence(Qt.Key.Key_Return),self,activated=self.connect_proxy)
 
     def theme_mode(self):
         if self.cfg["theme"]=="auto":
@@ -564,13 +649,6 @@ class MainWindow(QMainWindow):
             return QColor(system_accent())
         return QColor(self.cfg["accent"])
 
-    def cycle_theme(self):
-        order=["auto","dark","light"]
-        self.cfg["theme"]=order[(order.index(self.cfg["theme"])+1)%3]
-        save_config(self.cfg)
-        self._apply_style()
-        self.refresh_table()
-
     def open_settings(self):
         dlg=SettingsDialog(self,self.cfg)
         dlg.applied.connect(self.on_settings)
@@ -580,7 +658,6 @@ class MainWindow(QMainWindow):
         self.cfg=cfg
         save_config(self.cfg)
         self._apply_style()
-        self.refresh_table()
 
     def _bar_pressed(self,e):
         if e.button()==Qt.MouseButton.LeftButton:
@@ -594,127 +671,106 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self,e):
         super().resizeEvent(e)
+        QTimer.singleShot(50,self._relayout_cards)
 
     def _apply_style(self):
         dark=(self.theme_mode()=="dark")
         a=self.current_accent()
         a_name=a.name()
-        a_hover=a.lighter(118).name()
-        a_press=a.darker(115).name()
-        a_border=f"rgba({a.red()},{a.green()},{a.blue()},130)"
+        sel_border="rgba({}, {}, {}, 235)".format(a.red(),a.green(),a.blue()) if self.cfg["accent"]!="auto" else"rgba(255,255,255,230)"
         if dark:
-            fg="#eef2f7"; muted="#9aa6b2"; line="rgba(255,255,255,40)"
-            glass="#141821"
-            solid="#161b22"
-            border=a_border
-            hover="rgba(255,255,255,28)"
-            sel=a_border
-            on_accent="#ffffff"
-            head=f"rgba(255,255,255,90)"
-            host_c="#79c0ff"; tls_c="#a371f7"
+            bg="qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #6F5C71,stop:0.55 #5F4F65,stop:1 #524659)"
+            fg="#ffffff"
+            fg2="rgba(255,255,255,185)"
+            fg3="rgba(255,255,255,135)"
+            chip_bg="rgba(255,255,255,24)"
+            soft="rgba(255,255,255,22)"
+            soft_hover="rgba(255,255,255,34)"
+            line="rgba(255,255,255,42)"
+            card_border="rgba(255,255,255,38)"
+            on_accent="#453a4b"
+            solid="#4e4254"
+            solid_line="rgba(255,255,255,50)"
         else:
-            fg="#1c2128"; muted="#57606a"; line="rgba(0,0,0,40)"
-            glass="#f5f7fa"
-            solid="#f6f8fa"
-            border=a_border
-            hover="rgba(0,0,0,28)"
-            sel=a_border
-            on_accent="#ffffff" if a.lightness()<150 else"#1c2128"
-            head=f"rgba(0,0,0,110)"
-            host_c="#0969da"; tls_c="#8250df"
-
-        theme_icons={"auto":"◐","dark":"🌙","light":"☀️"}
-        self.theme_btn.setText(theme_icons[self.cfg["theme"]])
-        self.theme_btn.setToolTip({"auto":"Тема: авто","dark":"Тема: тёмная","light":"Тема: светлая"}[self.cfg["theme"]])
-
+            bg="qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #d3c3da,stop:0.55 #c4b4cc,stop:1 #b3a5bd)"
+            fg="#372d3d"
+            fg2="rgba(55,45,61,160)"
+            fg3="rgba(55,45,61,120)"
+            chip_bg="rgba(255,255,255,120)"
+            soft="rgba(255,255,255,110)"
+            soft_hover="rgba(255,255,255,160)"
+            line="rgba(255,255,255,170)"
+            card_border="rgba(255,255,255,150)"
+            on_accent="#453a4b"
+            solid="#efe9f2"
+            solid_line="rgba(55,45,61,60)"
         qss=f"""
         QMainWindow{{background:transparent}}
-        #central{{background:transparent}}
-        #glass{{background:{glass};border:1.5px solid {border};border-radius:24px}}
-        #bar{{background:transparent}}
+        #central{{background:{bg};border-radius:26px}}
+        #glass{{background:transparent}}
+        #bar,#gridw{{background:transparent}}
+        #chip{{background:{chip_bg};border-radius:18px}}
         #logo{{border-radius:10px}}
-        #title{{font-size:19px;font-weight:800;color:{fg}}}
-        #ver{{font-size:11px;font-weight:700;color:{muted};background:{hover};border-radius:9px;padding:2px 8px}}
-        #cap{{color:{muted};font-size:12px;font-weight:700;letter-spacing:1px}}
-        #table{{background:transparent;border:none;color:{fg};font-size:14px;gridline-color:transparent;selection-background-color:transparent}}
-        #table::item{{padding:6px 6px;border:none;background:transparent;border-radius:9px}}
-        #table::item:hover{{background:{hover}}}
-        #table::item:selected{{background:{sel};color:{fg}}}
-        QHeaderView::section{{background:transparent;color:{muted};border:none;padding:8px 6px;font-weight:700;font-size:12px;letter-spacing:1px}}
-        QPushButton{{background:transparent;border:none;color:{fg};font-size:13px;font-weight:700;border-radius:12px;padding:8px 14px}}
-        QPushButton:hover{{background:{hover}}}
-        QPushButton:disabled{{color:{muted}}}
-        #primary{{background:{a_name};color:{on_accent};border-radius:14px;padding:10px 18px;font-size:14px}}
-        #primary:hover{{background:{a_hover}}}
-        #primary:disabled{{background:{hover};color:{muted}}}
-        #ghost{{border:1px solid {line};border-radius:14px}}
-        #ghost:checked{{background:{a_name};color:{on_accent};border-color:{a_name}}}
-        #link{{color:{a_name};font-weight:600}}
-        #link:hover{{background:{hover};border-radius:10px}}
-        QPushButton#seg{{border:1px solid {line};border-radius:16px;padding:6px 16px;font-size:12px;letter-spacing:1px}}
-        QPushButton#seg:checked{{background:{a_name};color:{on_accent};border-color:{a_name};font-weight:800}}
-        QPushButton#round{{border-radius:17px;font-size:15px}}
-        QPushButton#round:hover{{background:{hover}}}
-        QPushButton#win{{border-radius:12px;color:{muted};padding:2px 8px}}
-        #win:hover{{background:{hover};color:{fg}}}
-        #close:hover{{background:#e5484d;color:#ffffff}}
-        #status{{color:{muted};font-size:12px;padding:1px 4px}}
-        QLabel{{color:{fg}}}
-        QToolTip{{background:{solid};color:{fg};border:1px solid {line};padding:6px 10px;border-radius:8px;font-size:12px}}
-        QMenu{{background:{solid};color:{fg};border:1px solid {line};border-radius:10px;padding:6px}}
+        #title{{font-size:16px;font-weight:800;color:{fg}}}
+        #ver{{font-size:11px;font-weight:600;color:{fg2}}}
+        #empty{{color:{fg2};font-size:14px;font-weight:600;padding:40px}}
+        #status{{color:{fg3};font-size:11px;font-weight:600;padding:0 4px}}
+        QPushButton{{background:transparent;border:none;color:{fg};font-size:13px;font-weight:700;border-radius:14px;padding:8px 14px}}
+        QPushButton:disabled{{color:{fg3}}}
+        QPushButton#round{{background:{soft};border-radius:22px;font-size:16px;font-weight:700;padding:0}}
+        QPushButton#round:hover{{background:{soft_hover}}}
+        QPushButton#win{{background:{soft};border-radius:22px;font-size:14px;color:{fg2};padding:0}}
+        QPushButton#win:hover{{background:{soft_hover};color:{fg}}}
+        QPushButton#seg{{background:{soft};border:none;border-radius:19px;padding:9px 24px;font-size:13px;font-weight:700;color:{fg}}}
+        QPushButton#seg:checked{{background:#ffffff;color:{on_accent}}}
+        #pcard{{background:{soft};border:2px solid {card_border};border-radius:22px}}
+        #pcard:hover{{background:{soft_hover}}}
+        #pcard[sel="true"]{{background:{soft_hover};border:2px solid {sel_border}}}
+        #phost{{color:{fg};font-size:13px;font-weight:700;background:transparent}}
+        #badge{{border-radius:13px;padding:3px 10px;font-size:12px;font-weight:800;color:{fg2};background:{soft_hover}}}
+        #badge[st="good"]{{background:#8fe392;color:#123b18}}
+        #badge[st="mid"]{{background:#ecd35b;color:#4a3d0b}}
+        #badge[st="bad"]{{background:#e25a5a;color:#fff3f3}}
+        #badge[st="dead"]{{background:{soft_hover};color:{fg3}}}
+        #dock{{background:{soft};border-radius:26px}}
+        #primary{{background:#ffffff;color:{on_accent};border-radius:19px;padding:11px 16px;font-size:13px;font-weight:800}}
+        #primary:hover{{background:#f4eef6}}
+        #primary:disabled{{background:{soft_hover};color:{fg3}}}
+        #pill{{background:{soft_hover};border:none;border-radius:19px;padding:11px 16px;font-size:13px;font-weight:700;color:{fg}}}
+        #pill:hover{{background:{line}}}
+        #pill:checked{{background:#ffffff;color:{on_accent}}}
+        QLabel{{color:{fg};background:transparent}}
+        QToolTip{{background:{solid};color:{fg};border:1px solid {solid_line};padding:6px 10px;border-radius:8px;font-size:12px}}
+        QMenu{{background:{solid};color:{fg};border:1px solid {solid_line};border-radius:10px;padding:6px}}
         QMenu::item{{padding:8px 26px;border-radius:6px}}
-        QMenu::item:selected{{background:{a_name};color:{on_accent}}}
+        QMenu::item:selected{{background:{fg};color:{on_accent}}}
         QDialog,QMessageBox,QColorDialog,QInputDialog{{background:{solid};color:{fg}}}
         QMessageBox QLabel,QInputDialog QLabel,QFormLayout QLabel{{color:{fg}}}
-        QComboBox{{background:{hover};color:{fg};border:1px solid {line};border-radius:10px;padding:8px 12px;font-size:13px}}
-        QComboBox:hover{{border-color:{a_border}}}
+        QComboBox{{background:{soft_hover};color:{fg};border:1px solid {line};border-radius:10px;padding:8px 12px;font-size:13px}}
         QComboBox::drop-down{{border:none;width:24px}}
-        QComboBox::down-arrow{{image:none;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid {muted};margin-right:8px}}
-        QComboBox QAbstractItemView{{background:{solid};color:{fg};border:1px solid {line};selection-background-color:{a_name};selection-color:{on_accent};outline:none}}
+        QComboBox::down-arrow{{image:none;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid {fg2};margin-right:8px}}
+        QComboBox QAbstractItemView{{background:{solid};color:{fg};border:1px solid {solid_line};selection-background-color:{fg};selection-color:{on_accent};outline:none}}
         QRadioButton{{color:{fg};font-size:13px;spacing:8px}}
-        QRadioButton::indicator{{width:18px;height:18px;border:2px solid {muted};border-radius:9px;background:transparent}}
-        QRadioButton::indicator:checked{{border:5px solid {a_name}}}
-        QSpinBox,QLineEdit{{background:{hover};color:{fg};border:1px solid {line};border-radius:8px;padding:6px 10px;font-size:13px}}
+        QRadioButton::indicator{{width:18px;height:18px;border:2px solid {fg2};border-radius:9px;background:transparent}}
+        QRadioButton::indicator:checked{{border:5px solid {fg};}}
+        QSpinBox,QLineEdit{{background:{soft_hover};color:{fg};border:1px solid {line};border-radius:8px;padding:6px 10px;font-size:13px}}
         QGroupBox{{color:{fg}}}
-        QTableCornerButton::section{{background:transparent;border:none}}
-        QScrollBar:vertical{{background:transparent;width:10px;margin:4px}}
-        QScrollBar::handle:vertical{{background:{hover};border-radius:5px;min-height:30px}}
-        QScrollBar::handle:vertical:hover{{background:{a_border}}}
+        QDialogButtonBox QPushButton{{min-width:90px;background:{soft_hover};border-radius:10px}}
+        QScrollArea#list{{background:transparent;border:none}}
+        QScrollArea#list>QWidget>QWidget{{background:transparent}}
+        QScrollBar:vertical{{background:transparent;width:8px;margin:2px}}
+        QScrollBar::handle:vertical{{background:{soft_hover};border-radius:4px;min-height:30px}}
+        QScrollBar::handle:vertical:hover{{background:{line}}}
         QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0;background:transparent}}
-        QScrollBar:horizontal{{background:transparent;height:10px;margin:4px}}
-        QScrollBar::handle:horizontal{{background:{hover};border-radius:5px;min-width:30px}}
-        QScrollBar::handle:horizontal:hover{{background:{a_border}}}
-        QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{{width:0;background:transparent}}
-        QDialogButtonBox QPushButton{{min-width:90px}}
+        QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{{background:transparent}}
         """
         self.setStyleSheet(qss)
         for w in QApplication.topLevelWidgets():
-            w.setStyleSheet(qss)
-        self._host_color=host_c
-        self._tls_color=tls_c
+            if w is not self:
+                w.setStyleSheet(qss)
 
     def show_info(self):
         QMessageBox.information(self,"О пинге",self.INFO_TEXT)
-
-    def toggle_local(self):
-        if self.local_btn.isChecked():
-            cand=[p for p in self.all_proxies if p.proto=="mtproto" and p.ping>0]
-            cand.sort(key=lambda p:p.ping)
-            p=cand[0] if cand else None
-            if p is None:
-                self.local_btn.setChecked(False)
-                QMessageBox.warning(self,APP_NAME,"Нет рабочего MTProto-прокси для моста — подождите проверки.")
-                return
-            self.bridge.pick=lambda pp=p:pp
-            self.bridge.start()
-            self._bridge_pick=p
-            self.local_btn.setText(f"🔌 Локальный прокси :{self.bridge.port}")
-            self.set_status(f"🔌 Локальный SOCKS5 на 127.0.0.1:{self.bridge.port} через {p.host}")
-            subprocess.Popen(["xdg-open",f"tg://socks?server=127.0.0.1&port={self.bridge.port}"])
-        else:
-            self.bridge.stop()
-            self.local_btn.setText("🔌 Локальный прокси")
-            self.set_status("Локальный прокси остановлен")
 
     def open_author(self):
         subprocess.Popen(["xdg-open",AUTHOR_URL])
@@ -722,7 +778,7 @@ class MainWindow(QMainWindow):
     def pool(self):
         if self.mode=="socks5":
             return[p for p in self.all_proxies if p.proto=="socks5"]
-        return[p for p in self.all_proxies if p.ptype==self.mode]
+        return[p for p in self.all_proxies if p.proto=="mtproto"]
 
     def set_mode(self,mode):
         if self.manual_mode:
@@ -731,9 +787,19 @@ class MainWindow(QMainWindow):
         self.mode=mode
         self.btn_mtproto.setChecked(mode=="mtproto")
         self.btn_socks.setChecked(mode=="socks5")
-        self._refresh_now()
+        self.selected=None
+        self.connect_btn.setEnabled(False)
+        self.top=self._ordered(self.pool())[:MAX_SERVERS]
+        self._rebuild_grid()
+        self._update_status()
         if self.all_proxies and not self.ping_thread_running():
             self.start_ping()
+
+    def select(self,p):
+        self.selected=p
+        for c in self.cards.values():
+            c.refresh()
+        self.connect_btn.setEnabled(p is not None)
 
     def ping_thread_running(self):
         return self.ping_thread and self.ping_thread.isRunning()
@@ -742,7 +808,7 @@ class MainWindow(QMainWindow):
         if self.scan_thread and self.scan_thread.isRunning():
             return
         self.retry_timer.stop()
-        self.set_status("🔍 Поиск MTProto-прокси в интернете…")
+        self._set_status("🔍 Ищу прокси в интернете…")
         self.scan_thread=ScanThread(self)
         self.scan_thread.finished_scan.connect(self.on_scan_done)
         self.scan_thread.failed.connect(self.on_scan_failed)
@@ -754,29 +820,33 @@ class MainWindow(QMainWindow):
         self._rescan_scheduled=False
         self.all_proxies=proxies
         self.no_internet=False
-        self.set_status(f"Найдено {len(proxies)} прокси, измеряю пинг…")
         self.ping_timer.start()
         self.scan_timer.start()
-        self.top=self.pool()[:MAX_SERVERS]
-        self.refresh_table()
+        self.selected=None
+        self.connect_btn.setEnabled(False)
+        self.top=self._ordered(self.pool())[:MAX_SERVERS]
+        self._rebuild_grid()
+        self._set_status(f"Найдено {len(proxies)} прокси — измеряю пинг…")
         self.start_ping()
 
     def on_scan_failed(self,msg):
         self.no_internet=True
-        self.set_status("⚠ Нет интернета — повтор через 15 секунд…")
+        self._set_status("⚠ Нет интернета — повтор через 15 секунд…")
         if not self.top:
             QMessageBox.warning(self,APP_NAME,msg)
         self.retry_timer.start()
 
     def start_ping(self):
-        if not self.all_proxies or self.ping_thread_running():
+        if not self.all_proxies or self.ping_thread_running() or self.manual_mode:
             return
-        untested=[p for p in self.pool() if p.ping==-1.0]
-        targets=untested if untested else(self.top or self.pool())
+        pool=self.pool()
+        untested=[p for p in pool if p.ping==-1.0]
+        targets=untested if untested else(self.top or pool)
         if not targets:
             return
         self.ping_thread=PingThread(targets)
         self.ping_thread.one_done.connect(self.on_one_pinged)
+        self.ping_thread.finished.connect(self._round_done)
         self.ping_thread.start()
 
     def toggle_manual_ping(self):
@@ -792,50 +862,56 @@ class MainWindow(QMainWindow):
     def _manual_step(self):
         if not self.manual_mode:
             return
-        p=self.current_proxy()
+        p=self.selected
         if p is None:
-            self.set_status("Выберите сервер в таблице — пингую только его")
+            self._set_status("Выберите сервер — пингую только его")
             QTimer.singleShot(1500,self._manual_step)
             return
-        self.set_status(f"🎯 Пингую только {p.host}:{p.port} · остальные остановлены")
-        self.ping_thread=PingThread([p],timeout=1.0)
+        self._set_status(f"🎯 Пингую только {p.host}:{p.port}")
+        self.ping_thread=PingThread([p],timeout=2.5)
         self.ping_thread.one_done.connect(self.on_one_pinged)
         self.ping_thread.finished.connect(lambda:QTimer.singleShot(1500,self._manual_step))
         self.ping_thread.start()
 
     def on_one_pinged(self,proxy,ms):
-        proxy.ping=ms
-        self._schedule_refresh()
+        c=self.cards.get(id(proxy))
+        if c:
+            c.refresh()
+        if not self.manual_mode:
+            pool=self.pool()
+            tested=sum(1 for p in pool if p.ping!=-1.0)
+            alive=sum(1 for p in pool if p.valid and p.ping>0)
+            self._set_status(f"📶 Проверено {tested} из {len(pool)} · рабочих: {alive}")
 
-    def _ping_status(self):
-        tested=sum(1 for p in self.pool() if p.ping!=-1.0)
-        alive=sum(1 for p in self.pool() if p.ping>0)
-        return tested,alive
-
-    def _schedule_refresh(self):
-        if self._refresh_pending:
-            return
-        self._refresh_pending=True
-        QTimer.singleShot(400,self._refresh_now)
-
-    def _refresh_now(self):
-        self._refresh_pending=False
-        pool=self.pool()
-        alive=sorted([p for p in pool if p.ping>0],key=lambda p:p.ping)
-        untested=[p for p in pool if p.ping==-1.0]
-        dead=[p for p in pool if p.ping==-2.0]
-        self.top=(alive+untested+dead)[:MAX_SERVERS]
-        self.refresh_table()
+    def _round_done(self):
         if self.manual_mode:
             return
-        n_alive=len(alive)
-        tested,total=self._ping_status()
-        if total and tested<total:
-            self.set_status(f"📶 Проверено {tested} из {total} серверов · рабочих: {n_alive}")
-        elif n_alive:
-            self.set_status(f"✅ Рабочих прокси: {n_alive} · показаны лучшие {min(n_alive,MAX_SERVERS)} · обновление каждые {REPING_INTERVAL} с")
+        pool=self.pool()
+        newtop=self._ordered(pool)[:MAX_SERVERS]
+        if[id(p)for p in newtop]!=[id(p)for p in self.top]:
+            self.top=newtop
+            self._rebuild_grid()
+        self._update_status()
+
+    def _ordered(self,pool):
+        valid=sorted([p for p in pool if p.valid and p.ping>0],key=lambda p:p.ping)
+        untested=[p for p in pool if p.ping==-1.0]
+        dead=sorted([p for p in pool if p.ping!=-1.0 and not p.valid],key=lambda p:p.ping if p.ping>0 else 1e9)
+        return valid+untested+dead
+
+    def _update_status(self):
+        pool=self.pool()
+        if not pool:
+            self._set_status("Прокси этого типа не найдено")
+            return
+        tested=sum(1 for p in pool if p.ping!=-1.0)
+        alive=sum(1 for p in pool if p.valid and p.ping>0)
+        if tested<len(pool):
+            self._set_status(f"📶 Проверено {tested} из {len(pool)} · рабочих: {alive}")
+        elif alive:
+            self._set_status(f"✅ Рабочих прокси: {alive} · обновление каждые {REPING_INTERVAL} с")
         else:
-            self.set_status("⚠ Рабочих прокси не найдено — повторный поиск через 30 секунд…")
+            self._set_status("⚠ Рабочих прокси не найдено — пересканирую через 30 секунд…")
             if not self._rescan_scheduled:
                 self._rescan_scheduled=True
                 QTimer.singleShot(30000,self._rescan_reset)
@@ -844,60 +920,69 @@ class MainWindow(QMainWindow):
     def _rescan_reset(self):
         self._rescan_scheduled=False
 
-    def refresh_table(self):
-        prev=self.current_proxy()
-        self.table.setRowCount(len(self.top))
-        for i,p in enumerate(self.top):
-            num=QTableWidgetItem(str(i+1))
-            num.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i,0,num)
-            mark=""
-            if p.ping!=-1.0:
-                mark="✅ " if p.valid else "⚠ "
-            self.table.setItem(i,1,QTableWidgetItem(mark+p.host))
-            port=QTableWidgetItem(str(p.port))
-            port.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(i,2,port)
-            if p.ping>0:
-                text,color=f"{p.ping:.0f} мс",self._ping_color(p.ping)
-            elif p.ping==-2.0:
-                text,color="✖",QColor("#8b949e")
-            else:
-                text,color="…",QColor(muted_color(self.theme_mode()))
-            ping_item=QTableWidgetItem(text)
-            ping_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            ping_item.setForeground(color)
-            self.table.setItem(i,3,ping_item)
-        if prev:
-            for i,p in enumerate(self.top):
-                if p is prev:
-                    self.table.selectRow(i)
-                    break
-
-    @staticmethod
-    def _ping_color(ms):
-        if ms<150:
-            return QColor("#3fb950")
-        if ms<400:
-            return QColor("#d29922")
-        return QColor("#f85149")
-
-    def set_status(self,text):
+    def _set_status(self,text):
         self.status_lbl.setText(text)
 
+    def _rebuild_grid(self):
+        while self.grid_lay.count():
+            it=self.grid_lay.takeAt(0)
+            w=it.widget()
+            if w:
+                w.hide()
+                w.deleteLater()
+        self.cards={}
+        for i,p in enumerate(self.top):
+            c=ProxyCard(self,p)
+            self.cards[id(p)]=c
+            self.grid_lay.addWidget(c,i//2,i%2)
+        if not self.top:
+            self.grid_lay.addWidget(self.empty_lbl,0,0,1,2)
+            self.empty_lbl.show()
+        self._relayout_cards()
+
+    def _relayout_cards(self):
+        if not self.cards:
+            return
+        w=self.list.viewport().width()
+        colw=max(180,(w-14)//2)
+        avail=max(90,colw-116)
+        for c in self.cards.values():
+            c.set_avail(avail)
+
     def current_proxy(self):
-        row=self.table.currentRow()
-        return self.top[row]if 0<=row<len(self.top)else None
+        return self.selected
 
-    def connect_selected(self):
-        self.connect_proxy(self.table.currentIndex())
-
-    def connect_proxy(self,index):
-        p=self.current_proxy()
+    def connect_proxy(self):
+        p=self.selected
         if not p:
             return
-        self.set_status(f"🔗 Открываю {p.host}:{p.port} в Telegram…")
+        self._set_status(f"🔗 Открываю {p.host}:{p.port} в Telegram…")
         subprocess.Popen(["xdg-open",p.tg_link])
+
+    def toggle_local(self):
+        if self.local_btn.isChecked():
+            cand=[p for p in self.all_proxies if p.proto=="mtproto" and not p.secret.lower().startswith("ee") and p.valid and p.ping>0]
+            cand.sort(key=lambda p:p.ping)
+            p=cand[0] if cand else None
+            if p is None:
+                self.local_btn.setChecked(False)
+                QMessageBox.warning(self,APP_NAME,"Нет рабочего MTProto-прокси для моста — подождите проверки.")
+                return
+            self.bridge.pick=lambda pp=p:pp
+            try:
+                self.bridge.start()
+            except OSError as e:
+                self.local_btn.setChecked(False)
+                QMessageBox.warning(self,APP_NAME,"Не удалось запустить локальный прокси: {}".format(e))
+                return
+            self._bridge_pick=p
+            self.local_btn.setText(f"Локальный :{self.bridge.port}")
+            self._set_status(f"🔌 Локальный MTProto на 127.0.0.1:{self.bridge.port} через {p.host}")
+            subprocess.Popen(["xdg-open","tg://proxy?server=127.0.0.1&port={}&secret={}".format(self.bridge.port,LOCAL_SECRET.hex())])
+        else:
+            self.bridge.stop()
+            self.local_btn.setText("Локальный прокси")
+            self._set_status("Локальный прокси остановлен")
 
 class SettingsDialog(QDialog):
     applied=pyqtSignal(dict)
@@ -919,8 +1004,8 @@ class SettingsDialog(QDialog):
         form.setSpacing(12)
         self.theme_box=QComboBox()
         self.theme_box.addItem("Авто (по системе)","auto")
-        self.theme_box.addItem("Тёмная","dark")
-        self.theme_box.addItem("Светлая","light")
+        self.theme_box.addItem("Тёмная (фиолет)","dark")
+        self.theme_box.addItem("Светлая (лаванда)","light")
         self.theme_box.setCurrentIndex(max(0,self.theme_box.findData(cfg["theme"])))
         form.addRow("Тема",self.theme_box)
 
@@ -966,28 +1051,6 @@ class SettingsDialog(QDialog):
         cfg["accent"]="auto" if self.accent_auto.isChecked() else self._manual.name()
         self.applied.emit(cfg)
         self.accept()
-
-def apply_blur(win,radius=24):
-    try:
-        wid=int(win.winId())
-        w=win.width(); h=win.height()
-        r=radius
-        if r*2>h: r=h//2
-        if r*2>w: r=w//2
-        if r<0: r=0
-        rects=[
-            "0,0,{},{}".format(w,r),
-            "0,{},{},{}".format(r,w,h-2*r),
-            "0,{},{},{}".format(h-r,w,r),
-        ]
-        region=" ".join(rects)
-        subprocess.Popen([
-            "xprop","-id",str(wid),
-            "-f","_KDE_NET_WM_BLUR_BEHIND_REGION","32c",
-            "-set","_KDE_NET_WM_BLUR_BEHIND_REGION",region,
-        ],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
 
 def main():
     if not os.environ.get("QT_QPA_PLATFORM")and os.environ.get("DISPLAY"):

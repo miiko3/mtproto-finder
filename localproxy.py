@@ -1,33 +1,242 @@
 import hashlib
 import os
 import socket
+import struct
 import threading
 import time
 
 from Crypto.Cipher import AES
 
-DC_BY_PORT = {443: 2, 80: 2, 5222: 2, 88: 2, 8443: 2}
+ABRIDGED = b"\xef\xef\xef\xef"
+INTERMEDIATE = b"\xee\xee\xee\xee"
+SECURE_DD = b"\xdd\xdd\xdd\xdd"
+
+REQ_PQ_MULTI = 0xBE7E8EF1
+RES_PQ = 0x05162463
+
+RESERVED_NONCE_BEGINNINGS = (
+    b"HEAD",
+    b"POST",
+    b"GET ",
+    b"OPTI",
+    b"\xee\xee\xee\xee",
+    b"\xdd\xdd\xdd\xdd",
+    b"\x16\x03\x01\x02",
+)
+
+LOCAL_SECRET = bytes.fromhex("dddddddddddddddddddddddddddddddd")
+_SECRET_CACHE = {}
+
+
+def _secret_bytes(secret_val):
+    if isinstance(secret_val, bytes):
+        return secret_val[:16]
+    key = secret_val.strip().lower()
+    if key in _SECRET_CACHE:
+        return _SECRET_CACHE[key]
+    h = key
+    if h.startswith("dd") and len(h) == 34:
+        h = h[2:]
+    raw = bytes.fromhex(h)
+    if len(raw) < 16:
+        raise ValueError("bad secret")
+    raw = raw[:16]
+    _SECRET_CACHE[key] = raw
+    return raw
+
+
+def _derive(region48, secret):
+    fk = hashlib.sha256(region48[:32] + secret).digest()
+    fiv = region48[32:48]
+    rr = region48[::-1]
+    rk = hashlib.sha256(rr[:32] + secret).digest()
+    riv = rr[32:48]
+    return fk, fiv, rk, riv
+
+
+def _good_nonce(tag, dc_id):
+    while True:
+        r = bytearray(os.urandom(64))
+        if r[0] == 0xEF:
+            continue
+        if bytes(r[:4]) in RESERVED_NONCE_BEGINNINGS:
+            continue
+        if r[4:8] == b"\x00\x00\x00\x00":
+            continue
+        r[56:60] = tag
+        r[60:62] = (dc_id & 0xFFFF).to_bytes(2, "little")
+        r[62:64] = b"\x00\x00"
+        return r
 
 
 class Obf:
-    def __init__(self, secret, dc_id=2):
-        key16 = secret[:32]
-        self.raw = bytes.fromhex(key16) if len(key16) == 32 else bytes.fromhex("0123456789abcdef0123456789abcdef")
-        r = bytearray(os.urandom(64))
-        r[56:60] = dc_id.to_bytes(4, "little")
-        r[60:64] = b"\xEE" * 4
-        dec_key = hashlib.sha256(bytes(r[8:40]) + self.raw).digest()
-        dec_iv = hashlib.sha256(bytes(r[40:56]) + self.raw).digest()[:16]
-        rr = bytes(r[::-1])
-        enc_key = hashlib.sha256(rr[8:40] + self.raw).digest()
-        enc_iv = hashlib.sha256(rr[40:56] + self.raw).digest()[:16]
-        self.dec = AES.new(dec_key, AES.MODE_CTR, nonce=b"", initial_value=dec_iv)
-        self.enc = AES.new(enc_key, AES.MODE_CTR, nonce=b"", initial_value=enc_iv)
-        self.head = bytes(r[:56]) + self.dec.encrypt(bytes(r[56:64]))
+    def __init__(self, secret, dc_id=2, tag=ABRIDGED):
+        raw = _secret_bytes(secret)
+        r = _good_nonce(tag, dc_id)
+        fk, fiv, rk, riv = _derive(bytes(r[8:56]), raw)
+        self.enc = AES.new(fk, AES.MODE_CTR, nonce=b"", initial_value=fiv)
+        self.dec = AES.new(rk, AES.MODE_CTR, nonce=b"", initial_value=riv)
+        full = self.enc.encrypt(bytes(r))
+        self.head = bytes(r[:56]) + full[56:64]
 
 
 def obf_head(secret, dc_id=2):
     return Obf(secret, dc_id).head
+
+
+def _recvn(sock, n, timeout):
+    buf = b""
+    sock.settimeout(timeout)
+    try:
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                break
+            buf += chunk
+    except socket.timeout:
+        pass
+    except OSError:
+        pass
+    return buf
+
+
+def _server_side(client_header, secret=LOCAL_SECRET):
+    fk, fiv, rk, riv = _derive(client_header[8:56], secret)
+    recv = AES.new(fk, AES.MODE_CTR, nonce=b"", initial_value=fiv)
+    send = AES.new(rk, AES.MODE_CTR, nonce=b"", initial_value=riv)
+    plain = recv.encrypt(client_header)
+    return recv, send, plain[56:60], plain[60:62]
+
+
+def _frame_consumed(data, framing):
+    if framing == "abridged":
+        if len(data) < 1:
+            return None
+        b0 = data[0]
+        if b0 == 0x7F:
+            if len(data) < 4:
+                return None
+            ln = int.from_bytes(data[1:4], "little") * 4
+            if len(data) < 4 + ln:
+                return None
+            return 4 + ln, 4
+        ln = b0 * 4
+        if len(data) < 1 + ln:
+            return None
+        return 1 + ln, 1
+    if len(data) < 4:
+        return None
+    ln = int.from_bytes(data[:4], "little") & 0x7FFFFFFF
+    if len(data) < 4 + ln:
+        return None
+    return 4 + ln, 4
+
+
+def _deep_mtproto_ping(s, secret, timeout, dc_id=2):
+    h = secret.lower()
+    if h.startswith("dd") and len(h) == 34:
+        tag = SECURE_DD
+        framing = "pi"
+    else:
+        tag = ABRIDGED
+        framing = "abridged"
+    obf = Obf(secret, dc_id, tag)
+    s.sendall(obf.head)
+    nonce = os.urandom(16)
+    body = struct.pack("<I", REQ_PQ_MULTI) + nonce + bytes(160)
+    if framing == "abridged":
+        frame = bytes([len(body) // 4]) + body
+    else:
+        frame = struct.pack("<I", len(body)) + body
+    s.sendall(obf.enc.encrypt(frame))
+
+    data = b""
+    deadline = time.perf_counter() + timeout
+    s.settimeout(timeout)
+    while time.perf_counter() < deadline:
+        try:
+            chunk = s.recv(4096)
+        except socket.timeout:
+            break
+        except OSError:
+            break
+        if not chunk:
+            break
+        data += obf.dec.encrypt(chunk)
+        while True:
+            parsed = _frame_consumed(data, framing)
+            if parsed is None:
+                break
+            used, off = parsed
+            if used > len(data):
+                break
+            payload = data[off:used]
+            data = data[used:]
+            if len(payload) >= 20:
+                ctor = int.from_bytes(payload[:4], "little")
+                rnonce = payload[4:20]
+                if ctor == RES_PQ and rnonce == nonce:
+                    return True
+    return False
+
+
+def _ssl_obf_ping(proxy, dom, timeout):
+    import ssl as _ssl
+
+    ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    try:
+        raw = socket.create_connection((proxy.host, proxy.port), timeout=timeout)
+        ss = ctx.wrap_socket(raw, server_hostname=dom)
+    except (OSError, _ssl.SSLError):
+        return False
+    try:
+        ss.settimeout(timeout)
+        h = proxy.secret.lower()
+        if h.startswith("dd") and len(h) == 34:
+            tag = SECURE_DD
+            framing = "pi"
+        else:
+            tag = ABRIDGED
+            framing = "abridged"
+        obf = Obf(proxy.secret, 2, tag)
+        nonce = os.urandom(16)
+        body = struct.pack("<I", REQ_PQ_MULTI) + nonce + bytes(160)
+        if framing == "abridged":
+            frame = bytes([len(body) // 4]) + body
+        else:
+            frame = struct.pack("<I", len(body)) + body
+        ss.sendall(obf.head + obf.enc.encrypt(frame))
+        data = b""
+        deadline = time.perf_counter() + timeout
+        while time.perf_counter() < deadline:
+            try:
+                chunk = ss.recv(4096)
+            except (socket.timeout, OSError):
+                break
+            if not chunk:
+                break
+            data += obf.dec.encrypt(chunk)
+            while True:
+                parsed = _frame_consumed(data, framing)
+                if parsed is None:
+                    break
+                used, off = parsed
+                if used > len(data):
+                    break
+                payload = data[off:used]
+                data = data[used:]
+                if len(payload) >= 20:
+                    ctor = int.from_bytes(payload[:4], "little")
+                    if ctor == RES_PQ and payload[4:20] == nonce:
+                        return True
+        return False
+    finally:
+        try:
+            ss.close()
+        except OSError:
+            pass
 
 
 def handshake_ping(proxy, timeout=2.0):
@@ -37,32 +246,58 @@ def handshake_ping(proxy, timeout=2.0):
     except OSError:
         return -2.0, False
     s.settimeout(timeout)
-    ok = True
+    ok = False
     try:
         if proxy.proto == "socks5":
             s.sendall(b"\x05\x01\x00")
-            d = s.recv(2)
-            ok = len(d) >= 2 and d[0] == 5
+            d = _recvn(s, 2, timeout)
+            if len(d) == 2 and d[0] == 5 and d[1] == 0:
+                host = proxy.host.encode()
+                req = (
+                    b"\x05\x01\x00\x03"
+                    + bytes([len(host)])
+                    + host
+                    + proxy.port.to_bytes(2, "big")
+                )
+                s.sendall(req)
+                rep = _recvn(s, 10, timeout)
+                ok = len(rep) >= 2 and rep[0] == 5 and rep[1] == 0
         elif proxy.secret.lower().startswith("ee"):
-            from main import _tls_client_hello
-            s.sendall(_tls_client_hello(proxy))
-            d = s.recv(6)
-            ok = len(d) >= 2 and d[0] == 0x16
+            from main import _tls_client_hello, _sni_candidates
+
+            flight_ok = False
+            for dom in _sni_candidates(proxy):
+                try:
+                    c = socket.create_connection((proxy.host, proxy.port), timeout=timeout)
+                except OSError:
+                    break
+                c.settimeout(timeout)
+                try:
+                    c.sendall(_tls_client_hello(proxy, dom))
+                    d = _recvn(c, 6, timeout)
+                except OSError:
+                    d = b""
+                c.close()
+                if len(d) >= 5 and d[0] == 0x16 and d[1] == 0x03:
+                    flight_ok = True
+                    if _ssl_obf_ping(proxy, dom, timeout):
+                        ok = True
+                    break
+            if not ok and flight_ok:
+                ok = True
         else:
-            s.sendall(obf_head(proxy.secret, 2))
-            s.settimeout(0.35)
-            try:
-                s.recv(64)
-            except socket.timeout:
-                pass
+            ok = _deep_mtproto_ping(s, proxy.secret, timeout)
     except OSError:
         ok = False
+    except (ValueError, TypeError):
+        ok = False
+    total = (time.perf_counter() - t0) * 1000
     s.close()
-    return (time.perf_counter() - t0) * 1000, ok
+    return (total if ok else -2.0), ok
 
 
 class LocalBridge:
-    def __init__(self, port=10808):
+    def __init__(self, port=10811):
         self.port = port
         self.pick = None
         self.server = None
@@ -98,74 +333,63 @@ class LocalBridge:
             threading.Thread(target=self._client, args=(c,), daemon=True).start()
 
     def _client(self, c):
+        u = None
+        c.settimeout(10)
         try:
-            c.settimeout(5)
-            if c.recv(2)[:1] != b"\x05":
+            head = _recvn(c, 64, 10)
+            if len(head) != 64:
                 c.close()
                 return
-            c.sendall(b"\x05\x00")
-            head = c.recv(4)
-            if len(head) < 4 or head[1] != 1:
-                c.close()
-                return
-            atyp = head[3]
-            if atyp == 1:
-                raw = c.recv(6)
-                ip = socket.inet_ntoa(raw[:4])
-                port = int.from_bytes(raw[4:6], "big")
-            elif atyp == 3:
-                ln = c.recv(1)[0]
-                host = c.recv(ln).decode("utf-8", "replace")
-                raw = c.recv(2)
-                ip, port = host, int.from_bytes(raw, "big")
-            else:
+            recv_c, send_c, tag, dc_le = _server_side(head, LOCAL_SECRET)
+            if tag not in (ABRIDGED, INTERMEDIATE, SECURE_DD):
                 c.close()
                 return
             p = self.pick()
-            if p is None:
-                c.sendall(b"\x05\x01\x00\x01" + b"\x00" * 6)
+            if p is None or p.proto != "mtproto" or p.secret.lower().startswith("ee"):
                 c.close()
                 return
-            dc = DC_BY_PORT.get(port, 2)
-            obf = Obf(p.secret, dc)
-            u = socket.create_connection((p.host, p.port), timeout=6)
-            u.settimeout(15)
+            try:
+                dc = abs(struct.unpack("<h", dc_le)[0])
+            except (struct.error, ValueError):
+                dc = 0
+            obf = Obf(p.secret, dc or 2, tag)
+            u = socket.create_connection((p.host, p.port), timeout=8)
+            u.settimeout(10)
             u.sendall(obf.head)
-            c.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("127.0.0.1") + port.to_bytes(2, "big"))
-            self._relay(c, u, obf)
+            self._relay(c, u, recv_c, send_c, obf.dec, obf.enc)
         except Exception:
             try:
                 c.close()
             except OSError:
                 pass
+            if u is not None:
+                try:
+                    u.close()
+                except OSError:
+                    pass
 
-    def _relay(self, a, b, obf):
+    def _relay(self, c, u, recv_c, send_c, dec_u, enc_u):
         stop = threading.Event()
 
-        def one(src, dst, cipher=None):
+        def one(src, dst, decr, encr):
             try:
                 while not stop.is_set():
                     data = src.recv(65536)
                     if not data:
                         break
-                    if cipher:
-                        data = cipher.encrypt(data)
-                    dst.sendall(data)
+                    dst.sendall(encr.encrypt(decr.encrypt(data)))
             except OSError:
                 pass
             finally:
                 stop.set()
-                try:
-                    src.close()
-                except OSError:
-                    pass
-                try:
-                    dst.close()
-                except OSError:
-                    pass
+                for sock in (src, dst):
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
 
-        t1 = threading.Thread(target=one, args=(a, b), daemon=True)
-        t2 = threading.Thread(target=one, args=(b, a, obf.dec), daemon=True)
+        t1 = threading.Thread(target=one, args=(c, u, recv_c, enc_u))
+        t2 = threading.Thread(target=one, args=(u, c, dec_u, send_c))
         t1.start()
         t2.start()
         t1.join()
