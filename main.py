@@ -12,8 +12,8 @@ def ssl_context():
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from dataclasses import dataclass
 from PyQt6.QtCore import Qt,QThread,pyqtSignal,QTimer
-from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplication,QPalette
-from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea
+from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplication,QPalette,QPainter,QPainterPath
+from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea,QSizePolicy
 
 APP_NAME="MTProto Finder"
 APP_VERSION="1.4.0"
@@ -54,6 +54,18 @@ def resource_path(name):
     return os.path.join(base,name)
 
 LOGO=resource_path("logo.png")
+
+def circle_logo(size):
+    out=QPixmap(size,size)
+    out.fill(Qt.GlobalColor.transparent)
+    p=QPainter(out)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path=QPainterPath()
+    path.addEllipse(0,0,size,size)
+    p.setClipPath(path)
+    p.drawPixmap(0,0,QPixmap(LOGO).scaled(size,size,Qt.AspectRatioMode.KeepAspectRatioByExpanding,Qt.TransformationMode.SmoothTransformation))
+    p.end()
+    return out
 
 def load_config():
     try:
@@ -415,18 +427,20 @@ class ProxyCard(QFrame):
         self.win=win
         self.proxy=proxy
         self.setObjectName("pcard")
-        self.setFixedHeight(44)
+        self.setFixedHeight(54)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay=QHBoxLayout(self)
-        lay.setContentsMargins(16,0,8,0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(18,0,10,0)
+        lay.setSpacing(10)
         self.host_lbl=QLabel()
         self.host_lbl.setObjectName("phost")
+        self.host_lbl.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
         lay.addWidget(self.host_lbl,1)
         self.badge=QLabel("…")
         self.badge.setObjectName("badge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.badge.setMinimumWidth(76)
+        self.badge.setMinimumWidth(94)
+        self.badge.setFixedHeight(36)
         lay.addWidget(self.badge)
         self._avail=220
         self.refresh()
@@ -495,7 +509,7 @@ class MainWindow(QMainWindow):
         self._drag_pos=None
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setWindowIcon(QIcon(LOGO))
-        self.resize(740,780)
+        self.resize(700,920)
         self.setMinimumSize(600,540)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -526,11 +540,11 @@ class MainWindow(QMainWindow):
         chip=QFrame()
         chip.setObjectName("chip")
         chip_l=QHBoxLayout(chip)
-        chip_l.setContentsMargins(8,6,16,6)
-        chip_l.setSpacing(10)
+        chip_l.setContentsMargins(10,9,20,9)
+        chip_l.setSpacing(12)
         icon=QLabel()
         icon.setObjectName("logo")
-        icon.setPixmap(QPixmap(LOGO).scaled(38,38,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        icon.setPixmap(circle_logo(56))
         chip_l.addWidget(icon)
         col=QVBoxLayout()
         col.setSpacing(0)
@@ -544,10 +558,10 @@ class MainWindow(QMainWindow):
         bar.addWidget(chip)
         bar.addStretch()
 
-        def rbtn(text,slot,tip,name="round"):
+        def rbtn(text,slot,tip,name="round",size=48):
             b=QPushButton(text)
             b.setObjectName(name)
-            b.setFixedSize(44,44)
+            b.setFixedSize(size,size)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setToolTip(tip)
             b.clicked.connect(slot)
@@ -555,10 +569,10 @@ class MainWindow(QMainWindow):
             return b
 
         self.info_btn=rbtn("?",self.show_info,"Как считается пинг")
-        self.settings_btn=rbtn("⚙",self.open_settings,"Настройки")
         self.author_btn=rbtn("✈",self.open_author,"Автор @yetilov")
-        self.min_btn=rbtn("—",self.showMinimized,"Свернуть","win")
-        self.close_btn=rbtn("✕",self.close,"Закрыть","win")
+        self.settings_btn=rbtn("⚙",self.open_settings,"Настройки","win",34)
+        self.min_btn=rbtn("—",self.showMinimized,"Свернуть","win",34)
+        self.close_btn=rbtn("✕",self.close,"Закрыть","win",34)
         bar_widget=QWidget()
         bar_widget.setObjectName("bar")
         bar_widget.setLayout(bar)
@@ -607,11 +621,6 @@ class MainWindow(QMainWindow):
         self.empty_lbl.setObjectName("empty")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.status_lbl=QLabel("Готов")
-        self.status_lbl.setObjectName("status")
-        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.addWidget(self.status_lbl)
-
         dock=QFrame()
         dock.setObjectName("dock")
         bottom=QHBoxLayout(dock)
@@ -636,6 +645,11 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.ping_btn,1)
         bottom.addWidget(self.local_btn,1)
         body.addWidget(dock)
+
+        self.status_lbl=QLabel("Готов")
+        self.status_lbl.setObjectName("status")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.addWidget(self.status_lbl)
 
         QShortcut(QKeySequence(Qt.Key.Key_Return),self,activated=self.connect_proxy)
 
@@ -679,28 +693,28 @@ class MainWindow(QMainWindow):
         a_name=a.name()
         sel_border="rgba({}, {}, {}, 235)".format(a.red(),a.green(),a.blue()) if self.cfg["accent"]!="auto" else"rgba(255,255,255,230)"
         if dark:
-            bg="qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #6F5C71,stop:0.55 #5F4F65,stop:1 #524659)"
+            bg="qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #7B5F7D,stop:0.55 #69496B,stop:1 #5B375C)"
             fg="#ffffff"
             fg2="rgba(255,255,255,185)"
             fg3="rgba(255,255,255,135)"
-            chip_bg="rgba(255,255,255,24)"
-            soft="rgba(255,255,255,22)"
-            soft_hover="rgba(255,255,255,34)"
+            chip_bg="rgba(255,255,255,26)"
+            soft="rgba(255,255,255,18)"
+            soft_hover="rgba(255,255,255,30)"
             line="rgba(255,255,255,42)"
-            card_border="rgba(255,255,255,38)"
+            card_border="rgba(255,255,255,26)"
             on_accent="#453a4b"
             solid="#4e4254"
             solid_line="rgba(255,255,255,50)"
         else:
-            bg="qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #d3c3da,stop:0.55 #c4b4cc,stop:1 #b3a5bd)"
+            bg="qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #d3c3da,stop:0.55 #c4b4cc,stop:1 #b3a5bd)"
             fg="#372d3d"
             fg2="rgba(55,45,61,160)"
             fg3="rgba(55,45,61,120)"
             chip_bg="rgba(255,255,255,120)"
-            soft="rgba(255,255,255,110)"
+            soft="rgba(255,255,255,100)"
             soft_hover="rgba(255,255,255,160)"
             line="rgba(255,255,255,170)"
-            card_border="rgba(255,255,255,150)"
+            card_border="rgba(255,255,255,110)"
             on_accent="#453a4b"
             solid="#efe9f2"
             solid_line="rgba(55,45,61,60)"
@@ -709,36 +723,37 @@ class MainWindow(QMainWindow):
         #central{{background:{bg};border-radius:26px}}
         #glass{{background:transparent}}
         #bar,#gridw{{background:transparent}}
-        #chip{{background:{chip_bg};border-radius:18px}}
-        #logo{{border-radius:10px}}
-        #title{{font-size:16px;font-weight:800;color:{fg}}}
-        #ver{{font-size:11px;font-weight:600;color:{fg2}}}
+        #chip{{background:{chip_bg};border-radius:32px}}
+        #logo{{border-radius:28px}}
+        #title{{font-size:18px;font-weight:800;color:{fg}}}
+        #ver{{font-size:12px;font-weight:600;color:{fg2}}}
         #empty{{color:{fg2};font-size:14px;font-weight:600;padding:40px}}
-        #status{{color:{fg3};font-size:11px;font-weight:600;padding:0 4px}}
+        #status{{color:{fg3};font-size:10px;font-weight:600;padding:2px 4px}}
         QPushButton{{background:transparent;border:none;color:{fg};font-size:13px;font-weight:700;border-radius:14px;padding:8px 14px}}
         QPushButton:disabled{{color:{fg3}}}
-        QPushButton#round{{background:{soft};border-radius:22px;font-size:16px;font-weight:700;padding:0}}
+        QPushButton#round{{background:{soft};border-radius:24px;font-size:17px;font-weight:700;padding:0}}
         QPushButton#round:hover{{background:{soft_hover}}}
-        QPushButton#win{{background:{soft};border-radius:22px;font-size:14px;color:{fg2};padding:0}}
+        QPushButton#win{{background:rgba(255,255,255,12);border-radius:17px;font-size:12px;color:{fg2};padding:0}}
         QPushButton#win:hover{{background:{soft_hover};color:{fg}}}
-        QPushButton#seg{{background:{soft};border:none;border-radius:19px;padding:9px 24px;font-size:13px;font-weight:700;color:{fg}}}
-        QPushButton#seg:checked{{background:#ffffff;color:{on_accent}}}
-        #pcard{{background:{soft};border:2px solid {card_border};border-radius:22px}}
+        QPushButton#seg{{background:{soft};border:none;border-radius:23px;padding:12px 28px;font-size:15px;font-weight:800;color:{fg}}}
+        QPushButton#seg:checked{{background:rgba(255,255,255,36)}}
+        QPushButton#seg:hover{{background:rgba(255,255,255,28)}}
+        #pcard{{background:{soft};border:2px solid {card_border};border-radius:27px}}
         #pcard:hover{{background:{soft_hover}}}
         #pcard[sel="true"]{{background:{soft_hover};border:2px solid {sel_border}}}
-        #phost{{color:{fg};font-size:13px;font-weight:700;background:transparent}}
-        #badge{{border-radius:13px;padding:3px 10px;font-size:12px;font-weight:800;color:{fg2};background:{soft_hover}}}
-        #badge[st="good"]{{background:#8fe392;color:#123b18}}
-        #badge[st="mid"]{{background:#ecd35b;color:#4a3d0b}}
-        #badge[st="bad"]{{background:#e25a5a;color:#fff3f3}}
+        #phost{{color:{fg};font-size:16px;font-weight:800;background:transparent}}
+        #badge{{border-radius:18px;padding:2px 14px;font-size:14px;font-weight:800;color:{fg2};background:{soft_hover}}}
+        #badge[st="good"]{{background:#6e8f7c;color:#2be05e}}
+        #badge[st="mid"]{{background:#9a7a5c;color:#f6d808}}
+        #badge[st="bad"]{{background:#985060;color:#ff4252}}
         #badge[st="dead"]{{background:{soft_hover};color:{fg3}}}
-        #dock{{background:{soft};border-radius:26px}}
-        #primary{{background:#ffffff;color:{on_accent};border-radius:19px;padding:11px 16px;font-size:13px;font-weight:800}}
-        #primary:hover{{background:#f4eef6}}
-        #primary:disabled{{background:{soft_hover};color:{fg3}}}
-        #pill{{background:{soft_hover};border:none;border-radius:19px;padding:11px 16px;font-size:13px;font-weight:700;color:{fg}}}
-        #pill:hover{{background:{line}}}
-        #pill:checked{{background:#ffffff;color:{on_accent}}}
+        #dock{{background:rgba(255,255,255,16);border-radius:28px}}
+        #primary{{background:rgba(255,255,255,42);color:{fg};border-radius:22px;padding:13px 16px;font-size:14px;font-weight:800}}
+        #primary:hover{{background:rgba(255,255,255,56)}}
+        #primary:disabled{{background:rgba(255,255,255,18);color:{fg3}}}
+        #pill{{background:rgba(255,255,255,26);border:none;border-radius:22px;padding:13px 16px;font-size:14px;font-weight:700;color:{fg}}}
+        #pill:hover{{background:rgba(255,255,255,38)}}
+        #pill:checked{{background:rgba(255,255,255,48)}}
         QLabel{{color:{fg};background:transparent}}
         QToolTip{{background:{solid};color:{fg};border:1px solid {solid_line};padding:6px 10px;border-radius:8px;font-size:12px}}
         QMenu{{background:{solid};color:{fg};border:1px solid {solid_line};border-radius:10px;padding:6px}}
@@ -945,7 +960,7 @@ class MainWindow(QMainWindow):
             return
         w=self.list.viewport().width()
         colw=max(180,(w-14)//2)
-        avail=max(90,colw-116)
+        avail=max(90,colw-136)
         for c in self.cards.values():
             c.set_avail(avail)
 
