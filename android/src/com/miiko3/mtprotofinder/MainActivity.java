@@ -3,7 +3,15 @@ package com.miiko3.mtprotofinder;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.BitmapShader;
+import android.graphics.Shader;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -33,42 +41,40 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.crypto.Cipher;
 import javax.net.ssl.HttpsURLConnection;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 public class MainActivity extends Activity {
 
     static final String AUTHOR_URL = "https://t.me/yetilov";
-    static final String APP_VERSION = "0.1.3.2b";
+    static final String APP_VERSION = "0.1.3.3b";
     static final int MAX_SERVERS = 30;
     static final int LOCAL_PORT = 10811;
-    static final int REPING_MS = 5000;
+    static final int REPING_MS = 6000;
     static final int RESCAN_MS = 600000;
-    static final String INFO_TEXT = "Пинг считается по реальному «рукопожатию» MTProto: устанавливаем TCP-коннект, проводим obfuscated2-обмен и отправляем date-центру запрос req_pq_multi, дожидаясь корректного ответа resPQ. Поэтому зелёный пинг = прокси действительно релеи в Telegram.\n\nЕсли сервер не отвечает — он помечается «✖», а не рисуется с фейковыми 1 мс.";
+    static final String INFO_TEXT = "Пинг считается по-честному: приложение делает полноценное рукопожатие с сервером. Для MTProto это реальный запрос req_pq_multi к прокси и ответ Telegram-DC, для SOCKS5 — полный CONNECT, для FakeTLS — TLS ClientHello.\n\nЦветной бейдж получают только те серверы, которые реально работают с Telegram: зелёный — до 300 мс, жёлтый — до 1000 мс, красный — выше. Серый ✖ — рукопожатие не прошло: такой прокси в Telegram работать не будет.";
 
     static final int
-        C_BG_TOP = 0xFFA18BB0,
-        C_BG_BOT = 0xFF5E3F70,
+        C_BG_TOP = 0xFF7B5F7D,
+        C_BG_MID = 0xFF69496B,
+        C_BG_BOT = 0xFF5B375C,
         C_FG = 0xFFFFFFFF,
-        C_MUTED = 0xCCFFFFFF,
-        GLASS_TOP = 0x40FFFFFF,
-        GLASS_BOT = 0x26FFFFFF,
-        GLASS2_TOP = 0x59FFFFFF,
-        GLASS2_BOT = 0x33FFFFFF,
-        STROKE = 0x59FFFFFF,
-        ACC_TOP = 0x66FFFFFF,
-        ACC_BOT = 0x2EFFFFFF,
-        GREEN_BG = 0x335EFF5E,
-        GREEN_FG = 0xFF5EFF5E,
-        YELLOW_BG = 0x33D8C81E,
-        YELLOW_FG = 0xFFD8C81E,
-        RED_BG = 0x40FF3B3B,
-        RED_FG = 0xFFFF3B3B;
+        C_MUTED = 0xB3FFFFFF,
+        GLASS = 0x12FFFFFF,
+        GLASS_HI = 0x1EFFFFFF,
+        GLASS_ACC = 0x24FFFFFF,
+        GREEN_BG = 0xFF6E8F7C,
+        GREEN_FG = 0xFF2BE05E,
+        YELLOW_BG = 0xFF9A7A5C,
+        YELLOW_FG = 0xFFF6D808,
+        RED_BG = 0xFF985060,
+        RED_FG = 0xFFFF4252;
 
     static class Proxy {
         String host;
@@ -110,42 +116,54 @@ public class MainActivity extends Activity {
         static final String[] SOURCES = {
             "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
             "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/mtproto.txt",
-            "https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt"
+            "https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/MTProto.txt",
+            "https://cdn.jsdelivr.net/gh/MhdiTaheri/ProxyCollector@main/proxy.txt",
+            "https://cdn.jsdelivr.net/gh/SoliSpirit/mtproto@master/all_proxies.txt",
+            "https://cdn.jsdelivr.net/gh/Chumbayoumba/free-telegram-proxy-russia-2026@main/proxy-list.txt",
+            "https://cdn.jsdelivr.net/gh/horizonpaz-create/mtproto-live@main/mtproto.txt"
         };
         static final String[] SOCKS_SOURCES = {
             "https://cdn.jsdelivr.net/gh/monosans/proxy-list@main/proxies/socks5.txt",
             "https://cdn.jsdelivr.net/gh/TheSpeedX/PROXY-List@master/socks5.txt",
-            "https://cdn.jsdelivr.net/gh/hookzof/socks5_list@master/proxy.txt"
+            "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt",
+            "https://cdn.jsdelivr.net/gh/roosterkid/openproxylist@main/SOCKS5_RAW.txt",
+            "https://cdn.jsdelivr.net/gh/zloi-user/hideip.me@main/socks5.txt",
+            "https://cdn.jsdelivr.net/gh/casals-ar/proxy-list@main/socks5",
+            "https://cdn.jsdelivr.net/gh/ShiftyTR/Proxy-List@master/socks5.txt",
+            "https://cdn.jsdelivr.net/gh/Argh94/Proxy-List@main/SOCKS5.txt"
         };
         static final Pattern LINK_RE = Pattern.compile("(server|port|secret)=([^&\\s]+)");
         static String[] concat() { String[] o = new String[SOURCES.length + SOCKS_SOURCES.length]; System.arraycopy(SOURCES, 0, o, 0, SOURCES.length); System.arraycopy(SOCKS_SOURCES, 0, o, SOURCES.length, SOCKS_SOURCES.length); return o; }
         static final Set<String> SOCKSSET = new HashSet<>(Arrays.asList(SOCKS_SOURCES));
 
         static List<Proxy> fetch() {
-            List<Proxy> found = new ArrayList<>();
-            Set<String> seen = new HashSet<>();
-            for (String url : concat()) {
-                try {
-                    System.out.println("MTProtoFinder: fetching " + url);
-                    HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(15000);
-                    c.setRequestProperty("User-Agent", "MTProtoFinder");
-                    BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
-                    StringBuilder sb = new StringBuilder();
-                    String l;
-                    while ((l = r.readLine()) != null) sb.append(l).append('\n');
-                    c.disconnect();
-                    String text = sb.toString();
-                    System.out.println("MTProtoFinder: got " + text.length() + " bytes");
-                    if (url.endsWith(".json")) parseJson(text, found, seen);
-                    else if (SOCKSSET.contains(url)) parseSocks(text, found, seen);
-                    else parseText(text, found, seen);
-                } catch (Exception e) {
-                    System.out.println("MTProtoFinder: fetch error " + e);
-                }
+            List<Proxy> found = Collections.synchronizedList(new ArrayList<>());
+            Set<String> seen = Collections.synchronizedSet(new HashSet<>());
+            String[] urls = concat();
+            ExecutorService ex = Executors.newFixedThreadPool(urls.length);
+            List<Future<?>> fs = new ArrayList<>();
+            for (String url : urls) {
+                fs.add(ex.submit(() -> {
+                    try {
+                        HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
+                        c.setConnectTimeout(15000);
+                        c.setReadTimeout(15000);
+                        c.setRequestProperty("User-Agent", "MTProtoFinder");
+                        BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String l;
+                        while ((l = r.readLine()) != null) sb.append(l).append('\n');
+                        c.disconnect();
+                        String text = sb.toString();
+                        if (url.endsWith(".json")) parseJson(text, found, seen);
+                        else if (SOCKSSET.contains(url)) parseSocks(text, found, seen);
+                        else parseText(text, found, seen);
+                    } catch (Exception ignored) { }
+                }));
             }
-            return found;
+            for (Future<?> f : fs) try { f.get(25, TimeUnit.SECONDS); } catch (Exception ignored) { }
+            ex.shutdown();
+            return new ArrayList<>(found);
         }
 
         static void add(Proxy p, List<Proxy> f, Set<String> s) {
@@ -178,9 +196,12 @@ public class MainActivity extends Activity {
                 Matcher mp = Pattern.compile("\"port\"\\s*:\\s*(\\d+)").matcher(seg);
                 Matcher ms = Pattern.compile("\"secret\"\\s*:\\s*\"([^\"]+)\"").matcher(seg);
                 if (mh.find() && mp.find() && ms.find()) {
-                    try {
-                        add(new Proxy(mh.group(1), Integer.parseInt(mp.group(1)), ms.group(1)), f, s);
-                    } catch (Exception ignored) { }
+                    String sec = normSecret(ms.group(1));
+                    if (sec != null) {
+                        try {
+                            add(new Proxy(mh.group(1), Integer.parseInt(mp.group(1)), sec), f, s);
+                        } catch (Exception ignored) { }
+                    }
                 }
                 i = e;
             }
@@ -196,12 +217,21 @@ public class MainActivity extends Activity {
                     else if ("port".equals(k)) port = decode(v);
                     else if ("secret".equals(k)) secret = decode(v);
                 }
-                if (host != null && port != null && secret != null) {
-                    try {
-                        add(new Proxy(host.trim().replaceAll("\\.$", ""), Integer.parseInt(port), secret), f, s);
-                    } catch (Exception ignored) { }
+                if (host != null && port != null) {
+                    String sec = normSecret(decode(secret));
+                    if (sec != null) {
+                        try {
+                            add(new Proxy(host.trim().replaceAll("\\.$", ""), Integer.parseInt(port), sec), f, s);
+                        } catch (Exception ignored) { }
+                    }
                 }
             }
+        }
+
+        static String normSecret(String s) {
+            if (s == null) return null;
+            s = s.trim();
+            return s.matches("[0-9a-fA-F]{32,}") ? s.toLowerCase() : null;
         }
 
         static String decode(String s) {
@@ -263,10 +293,22 @@ public class MainActivity extends Activity {
                         ok = rn >= 2 && rep[0] == 5 && rep[1] == 0;
                     }
                 } else if (p.secret.toLowerCase().startsWith("ee")) {
-                    s.getOutputStream().write(tlsHello(domainFromSecret(p.secret)));
-                    byte[] b = new byte[6];
-                    int rn = recvN(s, b, (int) (timeout * 1000));
-                    ok = rn >= 2 && (b[0] & 0xFF) == 0x16 && (b[1] & 0xFF) == 0x03;
+                    List<String> snis = new ArrayList<>();
+                    for (String d : new String[]{domainFromSecret(p.secret), p.host, "www.cloudflare.com"}) {
+                        if (d != null && d.contains(".") && !snis.contains(d)) snis.add(d);
+                    }
+                    for (String dom : snis) {
+                        try {
+                            Socket c2 = new Socket();
+                            c2.connect(new InetSocketAddress(p.host, p.port), (int) (timeout * 1000));
+                            c2.setSoTimeout((int) (timeout * 1000));
+                            c2.getOutputStream().write(tlsHello(dom));
+                            byte[] b = new byte[6];
+                            int rn = recvN(c2, b, (int) (timeout * 1000));
+                            c2.close();
+                            if (rn >= 5 && (b[0] & 0xFF) == 0x16 && (b[1] & 0xFF) == 0x03) { ok = true; break; }
+                        } catch (Exception ignored) { }
+                    }
                 } else {
                     OutputStream os = s.getOutputStream();
                     String sec = p.secret;
@@ -373,59 +415,93 @@ public class MainActivity extends Activity {
         }
 
         static String domainFromSecret(String sec) {
-            if (sec == null || !sec.toLowerCase().startsWith("ee") || sec.length() < 4) return "www.cloudflare.com";
-            try {
-                StringBuilder o = new StringBuilder();
-                int i = 2;
-                while (i + 1 < sec.length()) {
-                    String ch = hexStr(sec.substring(i, i + 2));
-                    if (ch == null || !(Character.isLetterOrDigit(ch.charAt(0)) || ch.equals(".") || ch.equals("-"))) break;
-                    o.append(ch);
+            String h = sec == null ? "" : sec.toLowerCase();
+            if (!h.startsWith("ee") || h.length() < 36) return "www.cloudflare.com";
+            List<Integer> offs = new ArrayList<>();
+            offs.add(34);
+            for (int o = 2; o < Math.min(64, h.length() - 6); o += 2) if (o != 34) offs.add(o);
+            for (int off : offs) {
+                StringBuilder out = new StringBuilder();
+                boolean clean = true;
+                int i = off;
+                while (i + 1 < h.length()) {
+                    String ch = hexStr(h.substring(i, i + 2));
+                    if (ch == null) { clean = false; break; }
+                    char c = ch.charAt(0);
+                    if (!(Character.isLetterOrDigit(c) || c == '.' || c == '-')) break;
+                    out.append(c);
                     i += 2;
                 }
-                String d = o.toString().replaceAll("\\.$", "");
-                return (d.contains(".") && !d.isEmpty()) ? d : "www.cloudflare.com";
-            } catch (Exception e) { return "www.cloudflare.com"; }
+                String d = out.toString();
+                if (clean && d.length() >= 4 && d.indexOf('.') > 0 && !d.matches("[\\d.]+")) return d;
+            }
+            return "www.cloudflare.com";
         }
 
         static String hexStr(String s) {
             try { return new String(new byte[]{(byte) Integer.parseInt(s, 16)}); } catch (Exception e) { return null; }
         }
 
+        static void ext(ByteArrayOutputStream exts, int type, byte[] data) {
+            exts.write((type >> 8) & 0xFF);
+            exts.write(type & 0xFF);
+            exts.write((data.length >> 8) & 0xFF);
+            exts.write(data.length & 0xFF);
+            exts.write(data, 0, data.length);
+        }
+
         static byte[] tlsHello(String domain) {
-            ByteArrayOutputStream body = new ByteArrayOutputStream();
-            byte[] host = domain.getBytes();
+            SecureRandom rnd = new SecureRandom();
             try {
-                ByteArrayOutputStream sni = new ByteArrayOutputStream();
-                sni.write(new byte[]{(byte) 0x00, (byte) domain.length()});
-                sni.write(host);
-                ByteArrayOutputStream sniList = new ByteArrayOutputStream();
-                sniList.write(new byte[]{0x00, 0x00});
-                sniList.write(new byte[]{(byte) ((sni.size() >> 8) & 0xFF), (byte) (sni.size() & 0xFF)});
-                sniList.write(sni.toByteArray());
-                ByteArrayOutputStream sniExt = new ByteArrayOutputStream();
-                sniExt.write(new byte[]{0x00, 0x00});
-                sniExt.write(new byte[]{(byte) ((sniList.size() >> 8) & 0xFF), (byte) (sniList.size() & 0xFF)});
-                sniExt.write(sniList.toByteArray());
-                byte[] ciphers = new byte[]{(byte) 0x13, 0x01, (byte) 0x13, 0x02, (byte) 0x13, 0x03, 0x00, (byte) 0x9c, 0x00, 0x35};
-                ByteArrayOutputStream cl = new ByteArrayOutputStream();
-                cl.write(new byte[]{(byte) ((ciphers.length >> 8) & 0xFF), (byte) (ciphers.length & 0xFF)});
-                cl.write(ciphers);
+                byte[] host = domain.getBytes("UTF-8");
+                byte[] random = new byte[32];
+                rnd.nextBytes(random);
+                byte[] sid = new byte[32];
+                rnd.nextBytes(sid);
+                ByteArrayOutputStream sniEntry = new ByteArrayOutputStream();
+                sniEntry.write(0x00);
+                sniEntry.write(host.length);
+                sniEntry.write(host);
+                byte[] sniListData = cat(new byte[]{0x00, (byte) sniEntry.size()}, sniEntry.toByteArray());
+                byte[] sniExtData = cat(new byte[]{0x00, 0x00}, sniListData);
+                byte[] groups = new byte[]{0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19};
+                byte[] groupsData = cat(new byte[]{0x00, (byte) groups.length}, groups);
+                byte[] epfData = new byte[]{0x01, 0x00};
+                byte[] sigalgs = new byte[]{0x04, 0x03, 0x08, 0x04, 0x04, 0x01, 0x05, 0x03, 0x08, 0x05, 0x05, 0x01, 0x08, 0x06, 0x06, 0x01};
+                byte[] sigData = cat(new byte[]{0x00, (byte) sigalgs.length}, sigalgs);
+                byte[] versData = new byte[]{0x02, 0x03, 0x04, 0x03, 0x03};
+                byte[] xkey = new byte[32];
+                rnd.nextBytes(xkey);
+                byte[] ksEntry = cat(new byte[]{0x00, 0x1d, 0x00, (byte) xkey.length}, xkey);
+                byte[] ksData = cat(new byte[]{0x00, (byte) ksEntry.length}, ksEntry);
+                ByteArrayOutputStream exts = new ByteArrayOutputStream();
+                ext(exts, 0x0000, sniExtData);
+                ext(exts, 0x000a, groupsData);
+                ext(exts, 0x000b, epfData);
+                ext(exts, 0x000d, sigData);
+                ext(exts, 0x002b, versData);
+                ext(exts, 0x0033, ksData);
+                ext(exts, 0x0023, new byte[0]);
+                byte[] ciphers = new byte[]{0x13, 0x01, 0x13, 0x02, 0x13, 0x03, (byte) 0xc0, 0x2b, (byte) 0xc0, 0x2f, (byte) 0xc0, 0x2c, (byte) 0xc0, 0x30, (byte) 0xcc, (byte) 0xa9, (byte) 0xcc, (byte) 0xa8, (byte) 0xc0, 0x13, (byte) 0xc0, 0x14, 0x00, (byte) 0x9c, 0x00, (byte) 0x9d, 0x00, 0x2f, 0x00, 0x35, 0x00, 0x0a};
+                byte[] cl = cat(new byte[]{(byte) ((ciphers.length >> 8) & 0xFF), (byte) (ciphers.length & 0xFF)}, ciphers);
+                ByteArrayOutputStream body = new ByteArrayOutputStream();
                 body.write(new byte[]{0x03, 0x03});
-                body.write(new byte[32]);
-                body.write(new byte[]{0x00});
-                body.write(cl.toByteArray());
+                body.write(random);
+                body.write(32);
+                body.write(sid);
+                body.write(cl);
                 body.write(new byte[]{0x01, 0x00});
-                body.write(sniExt.toByteArray());
-                ByteArrayOutputStream hs = new ByteArrayOutputStream();
-                hs.write(new byte[]{0x01});
+                byte[] eb = exts.toByteArray();
+                body.write((eb.length >> 8) & 0xFF);
+                body.write(eb.length & 0xFF);
+                body.write(eb);
                 byte[] bl = body.toByteArray();
-                hs.write(new byte[]{(byte) ((bl.length >> 16) & 0xFF), (byte) ((bl.length >> 8) & 0xFF), (byte) (bl.length & 0xFF)});
-                hs.write(bl);
+                byte[] hs = cat(new byte[]{0x01, (byte) ((bl.length >> 16) & 0xFF), (byte) ((bl.length >> 8) & 0xFF), (byte) (bl.length & 0xFF)}, bl);
                 ByteArrayOutputStream rec = new ByteArrayOutputStream();
                 rec.write(new byte[]{0x16, 0x03, 0x01});
-                rec.write(new byte[]{(byte) ((hs.size() >> 8) & 0xFF), (byte) (hs.size() & 0xFF)});
-                rec.write(hs.toByteArray());
+                rec.write((hs.length >> 8) & 0xFF);
+                rec.write(hs.length & 0xFF);
+                rec.write(hs);
                 return rec.toByteArray();
             } catch (Exception e) { return new byte[]{0x16, 0x03, 0x01, 0x00, 0x00}; }
         }
@@ -453,77 +529,58 @@ public class MainActivity extends Activity {
             Proxy pr = top.get(i);
             if (v == null) {
                 LinearLayout card = new LinearLayout(MainActivity.this);
-                card.setOrientation(LinearLayout.VERTICAL);
+                card.setOrientation(LinearLayout.HORIZONTAL);
                 card.setGravity(Gravity.CENTER_VERTICAL);
-                card.setPadding(dp(12), dp(12), dp(12), dp(12));
-                card.setBackground(glass(16));
-                card.setElevation(dp(2));
+                card.setPadding(dp(18), 0, dp(10), 0);
+                card.setBackground(glass(27));
 
-                LinearLayout row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-
-                TextView rank = new TextView(MainActivity.this);
-                rank.setTextSize(10);
-                rank.setTypeface(null, Typeface.BOLD);
-                rank.setTextColor(0x99FFFFFF);
-                rank.setGravity(Gravity.CENTER);
-
-                LinearLayout mid = new LinearLayout(MainActivity.this);
-                mid.setOrientation(LinearLayout.VERTICAL);
-                mid.setPadding(dp(6), 0, 0, 0);
                 TextView host = new TextView(MainActivity.this);
                 host.setTextColor(C_FG);
-                host.setTextSize(14);
-                host.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+                host.setTextSize(16);
+                host.setTypeface(null, Typeface.BOLD);
                 host.setSingleLine(true);
                 host.setEllipsize(TextUtils.TruncateAt.END);
-                TextView info = new TextView(MainActivity.this);
-                info.setTextColor(C_MUTED);
-                info.setTextSize(11);
-                info.setSingleLine(true);
-                info.setEllipsize(TextUtils.TruncateAt.END);
-                mid.addView(host);
-                mid.addView(info);
-                row.addView(rank, new LinearLayout.LayoutParams(dp(18), ViewGroup.LayoutParams.WRAP_CONTENT));
-                row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
                 TextView ping = new TextView(MainActivity.this);
-                ping.setTextSize(12);
+                ping.setTextSize(14);
                 ping.setTypeface(null, Typeface.BOLD);
                 ping.setGravity(Gravity.CENTER);
-                ping.setPadding(dp(8), dp(4), dp(8), dp(4));
-                ping.setBackground(glass(12));
+                ping.setMinWidth(dp(94));
+                ping.setMaxLines(1);
 
-                card.addView(row);
-                card.addView(ping, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                card.setTag(new Object[]{rank, host, info, ping});
+                LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
+                bp.setMargins(dp(10), 0, 0, 0);
+                card.addView(host, hp);
+                card.addView(ping, bp);
+                card.setTag(new Object[]{host, ping});
                 v = card;
             }
             Object[] t = (Object[]) v.getTag();
-            ((TextView) t[0]).setText(String.valueOf(i + 1));
-            ((TextView) t[1]).setText(pr.host);
-            String infoTxt = pr.port + " · " + pr.label();
-            if (pr.ping != -1) infoTxt += pr.valid ? "  ✅" : "  ⚠";
-            ((TextView) t[2]).setText(infoTxt);
-            TextView pv = (TextView) t[3];
-            GradientDrawable pb = glass(12);
-            pv.setBackground(pb);
-            if (pr.ping > 0) {
-                pv.setText(String.format("%.0f мс", pr.ping));
-                if (pr.ping < 150) { pb.setColor(GREEN_BG); pv.setTextColor(GREEN_FG); }
-                else if (pr.ping < 400) { pb.setColor(YELLOW_BG); pv.setTextColor(YELLOW_FG); }
-                else { pb.setColor(RED_BG); pv.setTextColor(RED_FG); }
-            } else if (pr.ping == -2) {
-                pv.setText("✖");
-                pb.setColor(0x12FFFFFF);
-                pv.setTextColor(C_MUTED);
+            TextView host = (TextView) t[0], ping = (TextView) t[1];
+            host.setText(pr.host + ":" + pr.port);
+            GradientDrawable pb = new GradientDrawable();
+            pb.setCornerRadius(dp(18));
+            ping.setBackground(pb);
+            if (pr.ping == -1) {
+                ping.setText("…");
+                pb.setColor(GLASS_HI);
+                ping.setTextColor(C_MUTED);
+            } else if (pr.valid && pr.ping > 0) {
+                ping.setText(String.format("%.0f ms", pr.ping));
+                if (pr.ping < 300) { pb.setColor(GREEN_BG); ping.setTextColor(GREEN_FG); }
+                else if (pr.ping < 1000) { pb.setColor(YELLOW_BG); ping.setTextColor(YELLOW_FG); }
+                else { pb.setColor(RED_BG); ping.setTextColor(RED_FG); }
+            } else if (pr.ping > 0) {
+                ping.setText("✖");
+                pb.setColor(GLASS_HI);
+                ping.setTextColor(C_MUTED);
             } else {
-                pv.setText("…");
-                pb.setColor(0x12FFFFFF);
-                pv.setTextColor(C_MUTED);
+                ping.setText("—");
+                pb.setColor(GLASS_HI);
+                ping.setTextColor(C_MUTED);
             }
-            ((View) v).setBackground(pr == selected ? glassAccent(16) : glass(16));
+            v.setBackground(pr == selected ? glassAccent(27) : glass(27));
             return v;
         }
     };
@@ -539,100 +596,98 @@ public class MainActivity extends Activity {
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(2), 0, dp(2), dp(10));
+        head.setPadding(dp(2), 0, dp(2), dp(12));
 
-        LinearLayout logoWrap = new LinearLayout(this);
-        logoWrap.setGravity(Gravity.CENTER);
-        logoWrap.setBackground(glass(20));
-        logoWrap.setPadding(dp(5), dp(5), dp(5), dp(5));
+        LinearLayout chip = new LinearLayout(this);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(10), dp(9), dp(20), dp(9));
+        chip.setBackground(rounded(0x16FFFFFF, 32));
+
         ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.logo);
-        logoWrap.addView(logo, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        logo.setImageDrawable(circularLogo());
+        chip.addView(logo, new LinearLayout.LayoutParams(dp(56), dp(56)));
 
         LinearLayout tw = new LinearLayout(this);
         tw.setOrientation(LinearLayout.VERTICAL);
-        tw.setPadding(dp(10), 0, 0, 0);
+        tw.setPadding(dp(12), 0, 0, 0);
         titleView = new TextView(this);
         titleView.setText("MTProto Finder");
         titleView.setTextSize(18);
-        titleView.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(C_FG);
         verView = new TextView(this);
-        verView.setText("v" + APP_VERSION + " · реальный пинг");
-        verView.setTextSize(11);
+        verView.setText("v" + APP_VERSION);
+        verView.setTextSize(12);
         verView.setTextColor(C_MUTED);
-        verView.setBackground(glass(10));
-        verView.setPadding(dp(6), dp(2), dp(6), dp(2));
         tw.addView(titleView);
         tw.addView(verView);
 
-        head.addView(logoWrap);
-        head.addView(tw, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        infoBtn = roundBtn("🗣");
+        chip.addView(tw);
+        head.addView(chip);
+        LinearLayout spacer = new LinearLayout(this);
+        head.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        infoBtn = roundBtn("?");
         infoBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
             .setTitle("О пинге · v" + APP_VERSION)
             .setMessage(INFO_TEXT)
             .setPositiveButton("Понятно", null)
             .show());
-        authorBtn = roundBtn("✈️");
+        authorBtn = roundBtn("✈");
         authorBtn.setOnClickListener(v -> open(AUTHOR_URL));
+        LinearLayout.LayoutParams rb = new LinearLayout.LayoutParams(dp(48), dp(48));
+        rb.setMargins(dp(8), 0, 0, 0);
+        infoBtn.setLayoutParams(rb);
+        authorBtn.setLayoutParams(rb);
         head.addView(infoBtn);
         head.addView(authorBtn);
         rootLayout.addView(head);
 
-        LinearLayout track = new LinearLayout(this);
-        track.setOrientation(LinearLayout.HORIZONTAL);
-        track.setGravity(Gravity.CENTER);
-        track.setPadding(dp(3), dp(3), dp(3), dp(3));
-        track.setBackground(glass(24));
-        track.addView(btnMt = tab("MTPROTO"), tabLp());
-        track.addView(btnFt = tab("SOCKS5"), tabLp());
+        LinearLayout seg = new LinearLayout(this);
+        seg.setOrientation(LinearLayout.HORIZONTAL);
+        seg.setGravity(Gravity.CENTER);
+        btnMt = pill("MTProto");
+        btnFt = pill("SOCKS5");
         btnMt.setOnClickListener(v -> setMode("mtproto"));
         btnFt.setOnClickListener(v -> setMode("socks5"));
+        seg.addView(btnMt);
+        seg.addView(btnFt, segGap());
         LinearLayout.LayoutParams tip = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tip.setMargins(0, 0, 0, dp(8));
-        rootLayout.addView(track, tip);
+        tip.setMargins(0, 0, 0, dp(10));
+        rootLayout.addView(seg, tip);
 
         grid = new GridView(this);
         grid.setNumColumns(2);
         grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        int colW = (int) (getResources().getDisplayMetrics().widthPixels / 2f - dp(24));
+        int colW = (int) (getResources().getDisplayMetrics().widthPixels / 2f - dp(22));
         grid.setColumnWidth(colW);
-        grid.setHorizontalSpacing(dp(8));
-        grid.setVerticalSpacing(dp(8));
+        grid.setHorizontalSpacing(dp(10));
+        grid.setVerticalSpacing(dp(10));
         grid.setPadding(dp(2), dp(2), dp(2), dp(2));
         grid.setBackground(null);
         grid.setAdapter(adapter);
         grid.setOnItemClickListener((p, v, pos, id) -> { selected = top.get(pos); adapter.notifyDataSetChanged(); });
         grid.setOnItemLongClickListener((p, v, pos, id) -> { open(top.get(pos).link()); return true; });
         LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        gp.setMargins(0, dp(2), 0, dp(6));
+        gp.setMargins(0, dp(2), 0, dp(10));
         rootLayout.addView(grid, gp);
-
-        status = new TextView(this);
-        status.setTextSize(12);
-        status.setTextColor(C_MUTED);
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(dp(8), dp(6), dp(8), dp(4));
-        rootLayout.addView(status);
 
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER);
-        bar.setPadding(dp(5), dp(6), dp(5), dp(6));
-        bar.setBackground(glass(26));
-        bar.setElevation(dp(3));
-        btnConnect = action("🚀 Подключиться");
+        bar.setPadding(dp(8), dp(8), dp(8), dp(8));
+        bar.setBackground(rounded(0x14FFFFFF, 28));
+        btnConnect = action("Подключиться", true);
         btnConnect.setOnClickListener(v -> {
             if (selected != null) { open(selected.link()); toast("Открываю " + selected.host + " в Telegram"); }
             else toast("Сначала выберите сервер из списка");
         });
-        btnPing = action("🎯 Пинг");
+        btnPing = action("Пинг", false);
         btnPing.setOnClickListener(v -> toggleManual());
-        btnLocal = action("🔌 Локальный");
+        btnLocal = action("Локальный прокси", false);
         btnLocal.setOnClickListener(v -> toggleLocal());
         LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        ap.setMargins(dp(3), 0, dp(3), 0);
+        ap.setMargins(dp(5), 0, dp(5), 0);
         btnConnect.setLayoutParams(ap);
         btnPing.setLayoutParams(ap);
         btnLocal.setLayoutParams(ap);
@@ -641,26 +696,60 @@ public class MainActivity extends Activity {
         bar.addView(btnLocal);
         rootLayout.addView(bar);
 
+        status = new TextView(this);
+        status.setTextSize(10);
+        status.setTextColor(C_MUTED);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(8), dp(8), dp(8), dp(2));
+        rootLayout.addView(status);
+
         setContentView(rootLayout);
         setFilterUI();
         h.postDelayed(this::startScan, 100);
     }
 
-    int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
-
-    GradientDrawable bgGradient() {
-        return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{C_BG_TOP, C_BG_BOT});
+    android.graphics.drawable.Drawable circularLogo() {
+        Bitmap src = BitmapFactory.decodeResource(getResources(), R.drawable.logo);
+        int s = dp(56);
+        Bitmap out = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(out);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        BitmapShader sh = new BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        float sc = s / (float) Math.min(src.getWidth(), src.getHeight());
+        Matrix m = new Matrix();
+        m.setScale(sc, sc);
+        m.postTranslate((s - src.getWidth() * sc) / 2f, (s - src.getHeight() * sc) / 2f);
+        sh.setLocalMatrix(m);
+        p.setShader(sh);
+        cv.drawCircle(s / 2f, s / 2f, s / 2f, p);
+        return new BitmapDrawable(getResources(), out);
     }
 
-    GradientDrawable glass(float radius) { return glass(radius, false, false); }
-    GradientDrawable glassAccent(float radius) { return glass(radius, true, true); }
+    GradientDrawable rounded(int color, float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radius));
+        return d;
+    }
 
-    GradientDrawable glass(float radius, boolean dense, boolean accent) {
-        int top = accent ? ACC_TOP : (dense ? GLASS2_TOP : GLASS_TOP);
-        int bot = accent ? ACC_BOT : (dense ? GLASS2_BOT : GLASS_BOT);
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{top, bot});
-        d.setCornerRadius(radius);
-        d.setStroke(dp(1), accent ? 0x99FFFFFF : STROKE);
+    int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+
+    GradientDrawable bgGradient() {
+        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{C_BG_TOP, C_BG_MID, C_BG_BOT});
+    }
+
+    GradientDrawable glass(float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(GLASS);
+        d.setCornerRadius(dp(radius));
+        return d;
+    }
+
+    GradientDrawable glassAccent(float radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(GLASS_ACC);
+        d.setCornerRadius(dp(radius));
+        d.setStroke(dp(2), 0xD9FFFFFF);
         return d;
     }
 
@@ -668,39 +757,42 @@ public class MainActivity extends Activity {
         Button btn = new Button(this);
         btn.setText(t);
         btn.setAllCaps(false);
-        btn.setTextSize(15);
+        btn.setTextSize(17);
+        btn.setTypeface(null, Typeface.BOLD);
         btn.setTextColor(C_FG);
-        btn.setPadding(dp(4), dp(4), dp(4), dp(4));
-        btn.setBackground(glass(20));
+        btn.setPadding(0, 0, 0, 0);
+        btn.setGravity(Gravity.CENTER);
+        btn.setBackground(rounded(GLASS, 24));
         btn.setElevation(dp(1));
         return btn;
     }
 
-    Button tab(String t) {
+    Button pill(String t) {
         Button btn = new Button(this);
         btn.setText(t);
         btn.setAllCaps(false);
-        btn.setTextSize(12);
+        btn.setTextSize(15);
         btn.setTypeface(null, Typeface.BOLD);
-        btn.setPadding(dp(8), dp(9), dp(8), dp(9));
-        btn.setBackground(glass(20));
-        btn.setTextColor(C_MUTED);
+        btn.setPadding(dp(28), dp(12), dp(28), dp(12));
+        btn.setBackground(rounded(0x18FFFFFF, 23));
+        btn.setTextColor(C_FG);
         return btn;
     }
 
-    LinearLayout.LayoutParams tabLp() {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+    LinearLayout.LayoutParams segGap() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(dp(10), 0, 0, 0);
+        return lp;
     }
 
-    Button action(String t) {
+    Button action(String t, boolean bright) {
         Button btn = new Button(this);
         btn.setText(t);
         btn.setAllCaps(false);
-        btn.setTextSize(12);
+        btn.setTextSize(13);
         btn.setTypeface(null, Typeface.BOLD);
-        btn.setPadding(dp(4), dp(11), dp(4), dp(11));
-        btn.setBackground(glass(16));
-        btn.setElevation(dp(1));
+        btn.setPadding(dp(4), dp(13), dp(4), dp(13));
+        btn.setBackground(rounded(bright ? 0x3EFFFFFF : 0x22FFFFFF, 22));
         btn.setTextColor(C_FG);
         return btn;
     }
@@ -711,13 +803,8 @@ public class MainActivity extends Activity {
     }
 
     void tint(Button btn, boolean on) {
-        if (on) {
-            btn.setBackground(glass(20, true, true));
-            btn.setTextColor(C_FG);
-        } else {
-            btn.setBackground(glass(20));
-            btn.setTextColor(C_MUTED);
-        }
+        btn.setBackground(rounded(on ? 0x36FFFFFF : 0x18FFFFFF, 23));
+        btn.setTextColor(C_FG);
     }
 
     void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show(); }
@@ -731,8 +818,7 @@ public class MainActivity extends Activity {
         if (bridge != null && bridge.isRunning()) {
             bridge.stop();
             bridge = null;
-            btnLocal.setBackground(glass(16));
-            btnLocal.setTextColor(C_FG);
+            btnLocal.setBackground(rounded(0x22FFFFFF, 22));
             setStatus("Локальный прокси остановлен");
             toast("Локальный прокси остановлен");
             return;
@@ -750,8 +836,7 @@ public class MainActivity extends Activity {
         final Proxy bp = best;
         bridge = new LocalBridge(LOCAL_PORT, () -> bp);
         bridge.start();
-        btnLocal.setBackground(glass(16, true, true));
-        btnLocal.setTextColor(C_FG);
+        btnLocal.setBackground(rounded(0x48FFFFFF, 22));
         setStatus("🔌 Локальный MTProto 127.0.0.1:" + LOCAL_PORT + " через " + best.host);
         open("tg://proxy?server=127.0.0.1&port=" + LOCAL_PORT + "&secret=" + LocalBridge.LOCAL_SECRET_HEX);
     }
@@ -815,9 +900,9 @@ public class MainActivity extends Activity {
             double ms = r[0];
             boolean ok = r[1] == 1;
             if (ms < 0) { ms = Net.tcpPing(p, 1); ok = false; }
-            final double fms = ms;
-            final boolean fok = ok;
-            if (!Thread.currentThread().isInterrupted()) h.post(() -> { p.ping = fms; p.valid = fok; scheduleRefresh(); });
+            p.ping = ms;
+            p.valid = ok;
+            if (!Thread.currentThread().isInterrupted() && !refreshPending) h.post(this::scheduleRefresh);
         }));
         pool.submit(() -> h.post(() -> pingBusy = false));
     }
@@ -856,14 +941,12 @@ public class MainActivity extends Activity {
     void toggleManual() {
         manual = !manual;
         if (manual) {
-            btnPing.setBackground(glass(16, true, true));
-            btnPing.setTextColor(C_FG);
+            btnPing.setBackground(rounded(0x48FFFFFF, 22));
             cancelPings();
             h.removeCallbacks(repingRun);
             manualStep();
         } else {
-            btnPing.setBackground(glass(16));
-            btnPing.setTextColor(C_FG);
+            btnPing.setBackground(rounded(0x22FFFFFF, 22));
             h.postDelayed(repingRun, REPING_MS);
         }
     }
@@ -880,8 +963,7 @@ public class MainActivity extends Activity {
         pool.submit(() -> {
             double[] r = Net.handshakePing(p, 2);
             h.post(() -> { p.ping = r[0]; p.valid = r[1] == 1 || r[0] > 0; scheduleRefresh(); manualStep(); });
-        });
-    }
+        });    }
 
     Runnable repingRun = new Runnable() {
         public void run() {
@@ -890,7 +972,9 @@ public class MainActivity extends Activity {
             if (!un.isEmpty()) startPing(un);
             else if (!top.isEmpty()) for (Proxy p : new ArrayList<>(top)) pool.submit(() -> {
                 double[] r = Net.handshakePing(p, 2);
-                h.post(() -> { p.ping = r[0]; p.valid = r[1] == 1 || r[0] > 0; scheduleRefresh(); });
+                p.ping = r[0];
+                p.valid = r[1] == 1 || r[0] > 0;
+                if (!refreshPending) h.post(MainActivity.this::scheduleRefresh);
             });
             h.postDelayed(this, REPING_MS);
         }

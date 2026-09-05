@@ -21,7 +21,7 @@ MTProto и SOCKS5 — и показывает их **настоящий пинг
 | Файл | Для |
 |---|---|
 | `MTProto-Finder-x86_64.AppImage` | Linux x86_64, запуск без установки |
-| `MTProto-Finder-v0.1.3.2b.apk` | Android 8+ |
+| `MTProto-Finder-v0.1.3.3b.apk` | Android 8+ |
 
 ```bash
 chmod +x MTProto-Finder-x86_64.AppImage
@@ -94,7 +94,7 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 | Платформа | Версия | Статус |
 |---|---|---|
 | Linux (AppImage) | 1.4.0 | ✅ стабильная |
-| Android (APK) | 0.1.3.2b | 🧪 бета |
+| Android (APK) | 0.1.3.3b | 🧪 бета |
 | iOS (SwiftUI) | v0.pa1t | 🚧 пре-альфа, сборка на Mac |
 
 ## Поддержать
