@@ -1,6 +1,7 @@
 import hashlib
 import os
 import socket
+import sys
 import struct
 import threading
 import time
@@ -30,7 +31,10 @@ _SECRET_CACHE = {}
 
 def _secret_bytes(secret_val):
     if isinstance(secret_val, bytes):
-        return secret_val[:16]
+        raw = secret_val[:16]
+        if len(raw) >= 17 and raw[0] == 0xEE:
+            raw = raw[1:17]
+        return raw
     key = secret_val.strip().lower()
     if key in _SECRET_CACHE:
         return _SECRET_CACHE[key]
@@ -38,6 +42,8 @@ def _secret_bytes(secret_val):
     if h.startswith("dd") and len(h) == 34:
         h = h[2:]
     raw = bytes.fromhex(h)
+    if len(raw) >= 17 and raw[0] == 0xEE:
+        raw = raw[1:17]
     if len(raw) < 16:
         raise ValueError("bad secret")
     raw = raw[:16]
@@ -345,18 +351,78 @@ class LocalBridge:
                 c.close()
                 return
             p = self.pick()
-            if p is None or p.proto != "mtproto" or p.secret.lower().startswith("ee"):
+            if p is None or p.proto != "mtproto":
                 c.close()
                 return
             try:
                 dc = abs(struct.unpack("<h", dc_le)[0])
             except (struct.error, ValueError):
                 dc = 0
+            if not p.secret.lower().startswith("ee"):
+                obf = Obf(p.secret, dc or 2, tag)
+                u = socket.create_connection((p.host, p.port), timeout=8)
+                u.settimeout(15)
+                u.sendall(obf.head)
+                self._relay(c, u, recv_c, send_c, obf.dec, obf.enc, tls_wrap=False)
+                return
+            from main import _tls_client_hello, _sni_candidates
             obf = Obf(p.secret, dc or 2, tag)
-            u = socket.create_connection((p.host, p.port), timeout=8)
-            u.settimeout(10)
-            u.sendall(obf.head)
-            self._relay(c, u, recv_c, send_c, obf.dec, obf.enc)
+            try:
+                import ssl as _ssl
+                ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+                raw = socket.create_connection((p.host, p.port), timeout=8)
+                u = ctx.wrap_socket(raw, server_hostname=_sni_candidates(p)[0])
+                u.settimeout(15)
+                u.sendall(obf.head)
+                self._relay(c, u, recv_c, send_c, obf.dec, obf.enc, tls_wrap=False)
+                return
+            except Exception:
+                if u is not None:
+                    try:
+                        u.close()
+                    except OSError:
+                        pass
+                    u = None
+            for sni in _sni_candidates(p):
+                try:
+                    u = socket.create_connection((p.host, p.port), timeout=8)
+                    u.settimeout(6)
+                    u.sendall(_tls_client_hello(p, sni))
+                    buf = b""
+                    deadline = time.time() + 5
+                    while time.time() < deadline:
+                        try:
+                            chunk = u.recv(16384)
+                        except (socket.timeout, OSError):
+                            break
+                        if not chunk:
+                            break
+                        buf += chunk
+                        if len(buf) >= 5 and len(buf) >= 5 + int.from_bytes(buf[3:5], "big"):
+                            break
+                    if not buf or buf[0] != 0x16:
+                        try:
+                            u.close()
+                        except OSError:
+                            pass
+                        u = None
+                        continue
+                    u.settimeout(15)
+                    u.sendall(self._wrap_records(obf.head))
+                    _, trailing = self._strip_records(buf)
+                    self._relay(c, u, recv_c, send_c, obf.dec, obf.enc, tls_wrap=True, leftover=trailing)
+                    return
+                except Exception:
+                    if u is not None:
+                        try:
+                            u.close()
+                        except OSError:
+                            pass
+                        u = None
+            c.close()
+            return
         except Exception:
             try:
                 c.close()
@@ -368,16 +434,60 @@ class LocalBridge:
                 except OSError:
                     pass
 
-    def _relay(self, c, u, recv_c, send_c, dec_u, enc_u):
+    @staticmethod
+    def _wrap_records(data):
+        out = b""
+        while data:
+            chunk, data = data[:16384], data[16384:]
+            out += b"\x17\x03\x03" + len(chunk).to_bytes(2, "big") + chunk
+        return out
+
+    @staticmethod
+    def _strip_records(buf):
+        out = b""
+        while len(buf) >= 5:
+            ln = int.from_bytes(buf[3:5], "big")
+            if ln <= 0 or ln > 18432:
+                return buf, b""
+            if len(buf) < 5 + ln:
+                break
+            out += buf[5:5 + ln]
+            buf = buf[5 + ln:]
+        return out, buf
+
+    def _relay(self, c, u, recv_c, send_c, dec_u, enc_u, tls_wrap=False, leftover=b""):
         stop = threading.Event()
 
-        def one(src, dst, decr, encr):
+        def one(src, dst, decr, encr, to_tls, from_tls, initial):
+            buf = initial
             try:
                 while not stop.is_set():
-                    data = src.recv(65536)
-                    if not data:
-                        break
-                    dst.sendall(encr.encrypt(decr.encrypt(data)))
+                    progressed = False
+                    if from_tls and len(buf) >= 5:
+                        ln = int.from_bytes(buf[3:5], "big")
+                        if 0 < ln <= 18432 and 5 + ln <= len(buf):
+                            payload = buf[5:5 + ln]
+                            buf = buf[5 + ln:]
+                            plain = decr.encrypt(payload) if decr is not None else payload
+                            out = encr.encrypt(plain) if encr is not None else plain
+                            dst.sendall(out)
+                            progressed = True
+                        elif ln > 18432:
+                            break
+                    elif not from_tls and buf:
+                        plain = decr.encrypt(buf) if decr is not None else buf
+                        out = encr.encrypt(plain) if encr is not None else plain
+                        if to_tls:
+                            dst.sendall(self._wrap_records(out))
+                        else:
+                            dst.sendall(out)
+                        buf = b""
+                        progressed = True
+                    if not progressed:
+                        chunk = src.recv(65536)
+                        if not chunk:
+                            break
+                        buf += chunk
             except OSError:
                 pass
             finally:
@@ -388,8 +498,8 @@ class LocalBridge:
                     except OSError:
                         pass
 
-        t1 = threading.Thread(target=one, args=(c, u, recv_c, enc_u))
-        t2 = threading.Thread(target=one, args=(u, c, dec_u, send_c))
+        t1 = threading.Thread(target=one, args=(c, u, recv_c, enc_u, tls_wrap, False, b""), daemon=True)
+        t2 = threading.Thread(target=one, args=(u, c, dec_u, send_c, False, tls_wrap, leftover), daemon=True)
         t1.start()
         t2.start()
         t1.join()

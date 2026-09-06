@@ -88,7 +88,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.21.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -106,7 +106,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.21.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

@@ -173,27 +173,75 @@ class LocalBridge implements Runnable {
             if (dc == 0) dc = 2;
 
             MainActivity.Proxy p = pick.pick();
-            if (p == null || !"mtproto".equals(p.proto) || p.secret.toLowerCase().startsWith("ee")) {
+            if (p == null || !"mtproto".equals(p.proto)) {
                 c.close();
                 return;
             }
-            byte[] secret = secretBytes(p.secret);
+            boolean fakeTls = p.secret.toLowerCase().startsWith("ee");
+            byte[] secret = fakeTls ? obfSecret(p.secret) : secretBytes(p.secret);
 
-            HS up = build(tag, dc, secret);
-            u = new Socket();
-            u.connect(new InetSocketAddress(p.host, p.port), 8000);
-            u.setSoTimeout(10000);
-            u.getOutputStream().write(up.head());
-            u.getOutputStream().flush();
+            if (!fakeTls) {
+                final HS up = build(tag, dc, secret);
+                final Socket us = new Socket();
+                us.connect(new InetSocketAddress(p.host, p.port), 8000);
+                us.setSoTimeout(10000);
+                us.getOutputStream().write(up.head());
+                us.getOutputStream().flush();
+                Thread t1 = new Thread(() -> pipePlain(c, us, recvC, up.send(), false));
+                Thread t2 = new Thread(() -> pipePlain(us, c, up.recv(), sendC, false));
+                t1.start(); t2.start(); t1.join(); t2.join();
+                return;
+            }
 
-            final Socket cs = c;
-            final Socket us = u;
-            Thread t1 = new Thread(() -> pipe(cs, us, recvC, up.send()));
-            Thread t2 = new Thread(() -> pipe(us, cs, up.recv(), sendC));
-            t1.start();
-            t2.start();
-            t1.join();
-            t2.join();
+            String dom = MainActivity.Net.domainFromSecret(p.secret);
+            java.util.List<String> snis = new java.util.ArrayList<>();
+            for (String d : new String[]{dom, p.host, "www.cloudflare.com"})
+                if (d != null && d.contains(".") && !snis.contains(d)) snis.add(d);
+
+            try {
+                javax.net.ssl.SSLSocket ss = tlsSocket(p.host, p.port, snis.get(0));
+                final HS up = build(tag, dc, secret);
+                final javax.net.ssl.SSLSocket fss = ss;
+                OutputStream uo = fss.getOutputStream();
+                uo.write(up.head());
+                uo.flush();
+                Thread t1 = new Thread(() -> pipePlain(c, fss, recvC, up.send(), false));
+                Thread t2 = new Thread(() -> pipeTls(fss, c, up.recv(), sendC, new byte[0]));
+                t1.start(); t2.start(); t1.join(); t2.join();
+                return;
+            } catch (Exception ignored) {
+                try { if (u != null) u.close(); } catch (Exception ignored2) {}
+                u = null;
+            }
+
+            for (String sni : snis) {
+                try {
+                    u = new Socket();
+                    u.connect(new InetSocketAddress(p.host, p.port), 8000);
+                    u.setSoTimeout(6000);
+                    OutputStream uo = u.getOutputStream();
+                    uo.write(MainActivity.Net.tlsHello(sni));
+                    uo.flush();
+                    byte[] sh = readFlight(u);
+                    if (sh == null || sh.length < 5 || sh[0] != 0x16) {
+                        u.close(); u = null; continue;
+                    }
+                    u.setSoTimeout(10000);
+                    final HS up = build(tag, dc, secret);
+                    final Socket us = u;
+                    OutputStream uo2 = us.getOutputStream();
+                    uo2.write(record(up.head()));
+                    uo2.flush();
+                    Thread t1 = new Thread(() -> pipeWrap(c, us, recvC, up.send()));
+                    Thread t2 = new Thread(() -> pipeTls(us, c, up.recv(), sendC, new byte[0]));
+                    t1.start(); t2.start(); t1.join(); t2.join();
+                    return;
+                } catch (Exception ignored) {
+                    try { if (u != null) u.close(); } catch (Exception ignored2) {}
+                    u = null;
+                }
+            }
+            c.close();
             return;
         } catch (Exception ignored) {
         }
@@ -209,7 +257,51 @@ class LocalBridge implements Runnable {
         }
     }
 
-    private void pipe(Socket src, Socket dst, Cipher dec, Cipher enc) {
+    static byte[] record(byte[] payload) {
+        byte[] out = new byte[payload.length + 5];
+        out[0] = 0x17; out[1] = 0x03; out[2] = 0x03;
+        out[3] = (byte) ((payload.length >> 8) & 0xFF);
+        out[4] = (byte) (payload.length & 0xFF);
+        System.arraycopy(payload, 0, out, 5, payload.length);
+        return out;
+    }
+
+    static byte[] readFlight(Socket s) {
+        try {
+            InputStream in = s.getInputStream();
+            byte[] head5 = new byte[5];
+            if (!readFull(in, head5)) return null;
+            int ln = ((head5[3] & 0xFF) << 8) | (head5[4] & 0xFF);
+            if (ln <= 0 || ln > 18432) return null;
+            byte[] rest = new byte[ln];
+            if (!readFull(in, rest)) return null;
+            byte[] flight = new byte[5 + ln];
+            System.arraycopy(head5, 0, flight, 0, 5);
+            System.arraycopy(rest, 0, flight, 5, ln);
+            return flight;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    javax.net.ssl.SSLSocket tlsSocket(String host, int port, String sni) throws Exception {
+        javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+        ctx.init(null, new javax.net.ssl.TrustManager[]{new javax.net.ssl.X509TrustManager(){
+            public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
+            public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
+            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
+        }}, null);
+        javax.net.ssl.SSLSocket ss = (javax.net.ssl.SSLSocket) ctx.getSocketFactory().createSocket();
+        ss.connect(new InetSocketAddress(host, port), 8000);
+        javax.net.ssl.SSLParameters sp = new javax.net.ssl.SSLParameters();
+        sp.setServerNames(java.util.Collections.singletonList(new javax.net.ssl.SNIHostName(sni)));
+        ss.setSSLParameters(sp);
+        ss.setSoTimeout(10000);
+        ss.startHandshake();
+        return ss;
+    }
+
+    void pipePlain(Socket src, Socket dst, Cipher dec, Cipher enc, boolean wrapRecords) {
         try {
             InputStream in = src.getInputStream();
             OutputStream out = dst.getOutputStream();
@@ -218,17 +310,69 @@ class LocalBridge implements Runnable {
             while ((n = in.read(b)) > 0) {
                 byte[] plain = dec.update(b, 0, n);
                 byte[] x = enc.update(plain);
-                if (x != null && x.length > 0) out.write(x);
+                if (x != null && x.length > 0) out.write(wrapRecords ? record(x) : x);
             }
         } catch (Exception ignored) {
         }
+        closeBoth(src, dst);
+    }
+
+    void pipeWrap(Socket src, Socket dst, Cipher dec, Cipher enc) {
         try {
-            src.close();
+            InputStream in = src.getInputStream();
+            OutputStream out = dst.getOutputStream();
+            byte[] b = new byte[65536];
+            int n;
+            while ((n = in.read(b)) > 0) {
+                byte[] plain = dec.update(b, 0, n);
+                byte[] x = enc.update(plain);
+                if (x != null && x.length > 0) out.write(record(x));
+            }
         } catch (Exception ignored) {
         }
+        closeBoth(src, dst);
+    }
+
+    void pipeTls(Socket src, Socket dst, Cipher decUp, Cipher encC, byte[] initial) {
         try {
-            dst.close();
+            InputStream in = src.getInputStream();
+            OutputStream out = dst.getOutputStream();
+            byte[] buf = initial;
+            byte[] b = new byte[65536];
+            while (true) {
+                boolean progressed = false;
+                if (buf.length >= 5) {
+                    int ln = ((buf[3] & 0xFF) << 8) | (buf[4] & 0xFF);
+                    if (ln > 0 && ln <= 18432 && buf.length >= 5 + ln) {
+                        byte[] payload = Arrays.copyOfRange(buf, 5, 5 + ln);
+                        byte[] rest = new byte[buf.length - 5 - ln];
+                        System.arraycopy(buf, 5 + ln, rest, 0, rest.length);
+                        buf = rest;
+                        byte[] plain = decUp.update(payload);
+                        byte[] x = encC.update(plain);
+                        if (x != null && x.length > 0) out.write(x);
+                        progressed = true;
+                    } else if (ln > 18432) {
+                        break;
+                    }
+                }
+                if (!progressed) {
+                    int n = in.read(b);
+                    if (n < 0) break;
+                    byte[] nb = new byte[buf.length + n];
+                    System.arraycopy(buf, 0, nb, 0, buf.length);
+                    System.arraycopy(b, 0, nb, buf.length, n);
+                    buf = nb;
+                }
+            }
         } catch (Exception ignored) {
+        }
+        closeBoth(src, dst);
+    }
+
+    void closeBoth(Socket a, Socket b) {
+        for (Socket s : new Socket[]{a, b}) {
+            try { s.close(); } catch (Exception ignored) {}
         }
     }
 
@@ -238,6 +382,16 @@ class LocalBridge implements Runnable {
         if (h.length() >= 32) h = h.substring(0, 32);
         else h = "0123456789abcdef0123456789abcdef";
         return hex(h);
+    }
+
+    static byte[] obfSecret(String secretHex) {
+        try {
+            byte[] all = hex(secretHex.trim().toLowerCase());
+            if (all.length >= 17 && all[0] == (byte) 0xEE) return Arrays.copyOfRange(all, 1, 17);
+            return secretBytes(secretHex);
+        } catch (Exception e) {
+            return secretBytes(secretHex);
+        }
     }
 
     static Cipher cipher(int mode, byte[] key, byte[] iv) {

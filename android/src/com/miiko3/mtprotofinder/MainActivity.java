@@ -861,7 +861,7 @@ public class MainActivity extends Activity {
         }
         Proxy best = null;
         for (Proxy p : all)
-            if ("mtproto".equals(p.proto) && !p.secret.toLowerCase().startsWith("ee") && p.ping > 0 && p.valid)
+            if ("mtproto".equals(p.proto) && p.ping > 0 && p.valid)
                 if (best == null || p.ping < best.ping) best = p;
         if (best == null) { toast("Нет рабочего MTProto — подождите проверки"); return; }
         if (Net.handshakePing(best, 2)[0] < 0) {

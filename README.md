@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40yetilov-blue)](https://t.me/yetilov)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.1-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.2-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -51,7 +51,7 @@ chmod +x MTProto-Finder-x86_64.AppImage
 - 📋 Контекстное меню карточки: подключиться, скопировать ссылку или адрес; на Android — долгий тап
 - ⌨ Менюбар с горячими клавишами: `Ctrl+1/2` — тип прокси, `F5` — обновить, `Ctrl+,` — настройки, `F1` — справка
 - 🌸 Фиолетовый glass-интерфейс: безрамочное окно, тёмная и светлая темы, свой цвет акцента
-- 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер
+- 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер; работает и с FakeTLS-прокси (нативный TLS или record-обёртка), на Android то же самое
 - 🚙 Автозапуск при входе в систему (`./install_autostart.sh`)
 - 📴 Сам следит за интернетом: пропала сеть — пересканирует через 15 секунд
 
@@ -95,9 +95,9 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 
 | Платформа | Версия | Статус |
 |---|---|---|
-| Linux (AppImage) | 1.4.1 | ✅ стабильная |
+| Linux (AppImage) | 1.4.2 | ✅ стабильная |
 | Android (APK) | 0.1.3.4b | 🧪 бета |
-| iOS (SwiftUI) | v0.pa1t | 🚧 пре-альфа, сборка на Mac |
+| iOS (SwiftUI, Liquid Glass) | 0.21pre-alpha | 🚧 пре-альфа, сборка на Mac |
 
 ## Поддержать
 

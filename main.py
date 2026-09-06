@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplicat
 from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea,QMenuBar,QMenu,QSizePolicy
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.4.1"
+APP_VERSION="1.4.2"
 AUTHOR_URL="https://t.me/yetilov"
 MT_SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -39,6 +39,8 @@ SOCKS_SOURCES=[
 ]
 SOURCES=MT_SOURCES
 MAX_SERVERS=32
+WAVE_SIZE=48
+WAVE_ENOUGH=10
 REPING_INTERVAL=6
 RESCAN_INTERVAL=600
 LOCAL_PROXY_PORT=10811
@@ -509,8 +511,8 @@ class MainWindow(QMainWindow):
         self._drag_pos=None
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setWindowIcon(QIcon(LOGO))
-        self.resize(740,820)
-        self.setMinimumSize(600,560)
+        self.resize(680,760)
+        self.setMinimumSize(580,520)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._build_ui()
@@ -581,9 +583,7 @@ class MainWindow(QMainWindow):
             bar.addWidget(b)
             return b
 
-        self.info_btn=rbtn("?",self.show_info,"Как считается пинг")
         self.author_btn=rbtn("✈",self.open_author,"Автор @yetilov")
-        self.settings_btn=rbtn("⚙",self.open_settings,"Настройки","win",34)
         self.min_btn=rbtn("—",self.showMinimized,"Свернуть","win",34)
         self.close_btn=rbtn("✕",self.close,"Закрыть","win",34)
         bar_widget=QWidget()
@@ -967,10 +967,11 @@ class MainWindow(QMainWindow):
             return
         pool=self.pool()
         untested=[p for p in pool if p.ping==-1.0]
-        targets=untested if untested else(self.top or pool)
-        if not targets:
-            return
-        self.ping_thread=PingThread(targets)
+        if untested:
+            targets=untested[:WAVE_SIZE]
+        else:
+            targets=self.top or pool[:WAVE_SIZE]
+        self.ping_thread=PingThread(targets,timeout=1.5)
         self.ping_thread.one_done.connect(self.on_one_pinged)
         self.ping_thread.finished.connect(self._round_done)
         self.ping_thread.start()
@@ -1003,11 +1004,19 @@ class MainWindow(QMainWindow):
         c=self.cards.get(id(proxy))
         if c:
             c.refresh()
+        if ms>0 and proxy.valid:
+            newtop=self._ordered(self.pool())[:MAX_SERVERS]
+            if[id(p)for p in newtop]!=[id(p)for p in self.top]:
+                selected=self.selected
+                self.top=newtop
+                self._rebuild_grid()
+                if selected:
+                    self.select(selected)
         if not self.manual_mode:
             pool=self.pool()
             tested=sum(1 for p in pool if p.ping!=-1.0)
             alive=sum(1 for p in pool if p.valid and p.ping>0)
-            self._set_status(f"📶 Проверено {tested} из {len(pool)} · рабочих: {alive}")
+            self._set_status(f"📶 Проверено {tested}/{len(pool)} · рабочих: {alive}")
 
     def _round_done(self):
         if self.manual_mode:
@@ -1018,6 +1027,10 @@ class MainWindow(QMainWindow):
             self.top=newtop
             self._rebuild_grid()
         self._update_status()
+        alive=sum(1 for p in pool if p.valid and p.ping>0)
+        untested=sum(1 for p in pool if p.ping==-1.0)
+        if alive<WAVE_ENOUGH and untested:
+            QTimer.singleShot(200,self.start_ping)
 
     def _ordered(self,pool):
         valid=sorted([p for p in pool if p.valid and p.ping>0],key=lambda p:p.ping)
@@ -1087,7 +1100,7 @@ class MainWindow(QMainWindow):
 
     def toggle_local(self):
         if self.local_btn.isChecked():
-            cand=[p for p in self.all_proxies if p.proto=="mtproto" and not p.secret.lower().startswith("ee") and p.valid and p.ping>0]
+            cand=[p for p in self.all_proxies if p.proto=="mtproto" and p.valid and p.ping>0]
             cand.sort(key=lambda p:p.ping)
             p=cand[0] if cand else None
             if p is None:
