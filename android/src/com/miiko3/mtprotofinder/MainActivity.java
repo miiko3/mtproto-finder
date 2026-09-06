@@ -53,7 +53,7 @@ import javax.net.ssl.HttpsURLConnection;
 public class MainActivity extends Activity {
 
     static final String AUTHOR_URL = "https://t.me/yetilov";
-    static final String APP_VERSION = "0.1.3.3b";
+    static final String APP_VERSION = "0.1.3.4b";
     static final int MAX_SERVERS = 30;
     static final int LOCAL_PORT = 10811;
     static final int REPING_MS = 6000;
@@ -667,7 +667,7 @@ public class MainActivity extends Activity {
         grid.setBackground(null);
         grid.setAdapter(adapter);
         grid.setOnItemClickListener((p, v, pos, id) -> { selected = top.get(pos); adapter.notifyDataSetChanged(); });
-        grid.setOnItemLongClickListener((p, v, pos, id) -> { open(top.get(pos).link()); return true; });
+        grid.setOnItemLongClickListener((p, v, pos, id) -> { cardMenu(top.get(pos)); return true; });
         LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         gp.setMargins(0, dp(2), 0, dp(10));
         rootLayout.addView(grid, gp);
@@ -805,6 +805,42 @@ public class MainActivity extends Activity {
     void tint(Button btn, boolean on) {
         btn.setBackground(rounded(on ? 0x36FFFFFF : 0x18FFFFFF, 23));
         btn.setTextColor(C_FG);
+    }
+
+    void cardMenu(Proxy p) {
+        if (p == null) return;
+        selected = p;
+        adapter.notifyDataSetChanged();
+        String[] opts = {"Подключиться", "Скопировать ссылку", "Скопировать адрес", "Пинг"};
+        new AlertDialog.Builder(this)
+            .setTitle(p.host + ":" + p.port)
+            .setItems(opts, (d, which) -> {
+                if (which == 0) {
+                    open(p.link());
+                    toast("Открываю в Telegram");
+                } else if (which == 1) {
+                    copyText(p.link());
+                } else if (which == 2) {
+                    copyText(p.host + ":" + p.port);
+                } else {
+                    quickPing(p);
+                }
+            })
+            .show();
+    }
+
+    void copyText(String text) {
+        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("mtproto", text));
+        toast("Скопировано");
+    }
+
+    void quickPing(Proxy p) {
+        toast("Пингую " + p.host + "…");
+        pool.submit(() -> {
+            double[] r = Net.handshakePing(p, 3);
+            h.post(() -> toast(r[0] > 0 ? "Пинг " + String.format("%.0f", r[0]) + " ms" : "Недоступен"));
+        });
     }
 
     void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show(); }

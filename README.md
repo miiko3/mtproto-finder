@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40yetilov-blue)](https://t.me/yetilov)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.1-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -21,7 +21,7 @@ MTProto и SOCKS5 — и показывает их **настоящий пинг
 | Файл | Для |
 |---|---|
 | `MTProto-Finder-x86_64.AppImage` | Linux x86_64, запуск без установки |
-| `MTProto-Finder-v0.1.3.3b.apk` | Android 8+ |
+| `MTProto-Finder-v0.1.3.4b.apk` | Android 8+ |
 
 ```bash
 chmod +x MTProto-Finder-x86_64.AppImage
@@ -48,6 +48,8 @@ chmod +x MTProto-Finder-x86_64.AppImage
 - 🃏 Карточки в две колонки, до 32 серверов, пинг пересчитывается каждые 6 секунд
 - 🎯 Режим «Пинг» — пингует только выбранный сервер
 - 🚀 Подключение в один клик: двойной клик по карточке, Enter или кнопка «Подключиться» — прокси открывается в Telegram
+- 📋 Контекстное меню карточки: подключиться, скопировать ссылку или адрес; на Android — долгий тап
+- ⌨ Менюбар с горячими клавишами: `Ctrl+1/2` — тип прокси, `F5` — обновить, `Ctrl+,` — настройки, `F1` — справка
 - 🌸 Фиолетовый glass-интерфейс: безрамочное окно, тёмная и светлая темы, свой цвет акцента
 - 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер
 - 🚙 Автозапуск при входе в систему (`./install_autostart.sh`)
@@ -93,8 +95,8 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 
 | Платформа | Версия | Статус |
 |---|---|---|
-| Linux (AppImage) | 1.4.0 | ✅ стабильная |
-| Android (APK) | 0.1.3.3b | 🧪 бета |
+| Linux (AppImage) | 1.4.1 | ✅ стабильная |
+| Android (APK) | 0.1.3.4b | 🧪 бета |
 | iOS (SwiftUI) | v0.pa1t | 🚧 пре-альфа, сборка на Mac |
 
 ## Поддержать

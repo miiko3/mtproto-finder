@@ -15,5 +15,5 @@ if [ ! -f keystore.jks ]; then
 keytool -genkeypair -v -keystore keystore.jks -alias mtproto -keyalg RSA -keysize 2048 -validity 10000 -storepass mtprotofinder -keypass mtprotofinder -dname "CN=MTProto Finder,OU=miiko3,O=yetilov,C=RU"
 fi
 "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
-"$BT/apksigner" sign --ks keystore.jks --ks-pass pass:mtprotofinder --key-pass pass:mtprotofinder --out MTProto-Finder-v0.1.3.3b.apk build/aligned.apk
-"$BT/apksigner" verify MTProto-Finder-v0.1.3.3b.apk && echo "OK: MTProto-Finder-v0.1.3.3b.apk"
+"$BT/apksigner" sign --ks keystore.jks --ks-pass pass:mtprotofinder --key-pass pass:mtprotofinder --out MTProto-Finder-v0.1.3.4b.apk build/aligned.apk
+"$BT/apksigner" verify MTProto-Finder-v0.1.3.4b.apk && echo "OK: MTProto-Finder-v0.1.3.4b.apk"

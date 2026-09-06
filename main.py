@@ -12,11 +12,11 @@ def ssl_context():
 from concurrent.futures import ThreadPoolExecutor,as_completed
 from dataclasses import dataclass
 from PyQt6.QtCore import Qt,QThread,pyqtSignal,QTimer
-from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplication,QPalette,QPainter,QPainterPath
-from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea,QSizePolicy
+from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplication,QPalette,QPainter,QPainterPath,QAction
+from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea,QMenuBar,QMenu,QSizePolicy
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.4.0"
+APP_VERSION="1.4.1"
 AUTHOR_URL="https://t.me/yetilov"
 MT_SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -509,11 +509,12 @@ class MainWindow(QMainWindow):
         self._drag_pos=None
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setWindowIcon(QIcon(LOGO))
-        self.resize(700,920)
-        self.setMinimumSize(600,540)
+        self.resize(740,820)
+        self.setMinimumSize(600,560)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._build_ui()
+        self._build_menus()
         self._apply_style()
         self.ping_timer=QTimer(self,interval=REPING_INTERVAL*1000,timeout=self.start_ping)
         self.scan_timer=QTimer(self,interval=RESCAN_INTERVAL*1000,timeout=self.start_scan)
@@ -525,8 +526,20 @@ class MainWindow(QMainWindow):
         root_widget.setObjectName("central")
         self.setCentralWidget(root_widget)
         outer=QVBoxLayout(root_widget)
-        outer.setContentsMargins(14,14,14,14)
-        outer.setSpacing(10)
+        outer.setContentsMargins(14,8,14,14)
+        outer.setSpacing(6)
+
+        menu_row=QWidget()
+        menu_row.setObjectName("menurow")
+        mr=QHBoxLayout(menu_row)
+        mr.setContentsMargins(6,0,6,0)
+        mr.setSpacing(6)
+        self.menubar=QMenuBar()
+        self.menubar.setObjectName("menubar")
+        self.menubar.setNativeMenuBar(False)
+        mr.addWidget(self.menubar)
+        mr.addStretch()
+        outer.addWidget(menu_row)
 
         card=QFrame()
         card.setObjectName("glass")
@@ -616,6 +629,8 @@ class MainWindow(QMainWindow):
         self.grid_lay.setColumnStretch(1,1)
         self.list.setWidget(self.grid_w)
         body.addWidget(self.list,1)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._card_menu)
 
         self.empty_lbl=QLabel("🔍 Ищу рабочие прокси…")
         self.empty_lbl.setObjectName("empty")
@@ -652,6 +667,98 @@ class MainWindow(QMainWindow):
         body.addWidget(self.status_lbl)
 
         QShortcut(QKeySequence(Qt.Key.Key_Return),self,activated=self.connect_proxy)
+
+    def _build_menus(self):
+        mb=self.menubar
+        m_app=mb.addMenu(APP_NAME)
+        about_a=QAction("Как считается пинг",self)
+        about_a.setShortcut("F1")
+        about_a.triggered.connect(self.show_info)
+        m_app.addAction(about_a)
+        settings_a=QAction("Настройки оформления",self)
+        settings_a.setShortcut("Ctrl+,")
+        settings_a.triggered.connect(self.open_settings)
+        m_app.addAction(settings_a)
+        m_app.addSeparator()
+        quit_a=QAction("Завершить",self)
+        quit_a.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_a.triggered.connect(self.close)
+        m_app.addAction(quit_a)
+
+        m_view=mb.addMenu("Вид")
+        mt_a=QAction("MTProto",self)
+        mt_a.setShortcut("Ctrl+1")
+        mt_a.triggered.connect(lambda:self.set_mode("mtproto"))
+        sk_a=QAction("SOCKS5",self)
+        sk_a.setShortcut("Ctrl+2")
+        sk_a.triggered.connect(lambda:self.set_mode("socks5"))
+        m_view.addAction(mt_a)
+        m_view.addAction(sk_a)
+        m_view.addSeparator()
+        refresh_a=QAction("Обновить прокси",self)
+        refresh_a.setShortcut("F5")
+        refresh_a.triggered.connect(self.start_scan)
+        m_view.addAction(refresh_a)
+
+        m_proxy=mb.addMenu("Прокси")
+        self.conn_a=QAction("Подключиться",self)
+        self.conn_a.setShortcut(Qt.Key.Key_Return)
+        self.conn_a.triggered.connect(self.connect_proxy)
+        self.copy_a=QAction("Скопировать ссылку",self)
+        self.copy_a.setShortcut("Ctrl+Shift+C")
+        self.copy_a.triggered.connect(lambda:self._copy_link())
+        m_proxy.addAction(self.conn_a)
+        m_proxy.addAction(self.copy_a)
+        self.m_proxy=m_proxy
+        m_proxy.aboutToShow.connect(lambda:self._sync_proxy_menu())
+
+    def _sync_proxy_menu(self):
+        has=self.selected is not None
+        self.conn_a.setEnabled(has)
+        self.copy_a.setEnabled(has)
+
+    def _proxy_at(self,pos):
+        w=self.list.widget().childAt(pos)
+        while w is not None and not isinstance(w,ProxyCard):
+            w=w.parentWidget()
+        return w.proxy if w else None
+
+    def _card_menu(self,pos):
+        pr=self._proxy_at(pos)
+        m=QMenu(self)
+        if pr:
+            self.select(pr)
+            a1=m.addAction(f"Подключиться · {pr.host}:{pr.port}")
+            a1.triggered.connect(lambda:subprocess.Popen(["xdg-open",pr.tg_link]))
+            a2=m.addAction("Скопировать ссылку")
+            a2.triggered.connect(lambda:self._copy_link(pr))
+            a3=m.addAction("Скопировать адрес")
+            a3.triggered.connect(lambda:self._copy_text(f"{pr.host}:{pr.port}"))
+        else:
+            a=m.addAction("Обновить прокси")
+            a.triggered.connect(self.start_scan)
+        m.exec(self.list.viewport().mapToGlobal(pos))
+
+    def _copy_text(self,text):
+        QApplication.clipboard().setText(text)
+        self._set_status(f"Скопировано: {text[:60]}")
+
+    def _copy_link(self,pr=None):
+        pr=pr or self.selected
+        if pr:
+            self._copy_text(pr.tg_link)
+
+    def closeEvent(self,e):
+        self.ping_timer.stop()
+        self.scan_timer.stop()
+        self.retry_timer.stop()
+        if self.ping_thread and self.ping_thread.isRunning():
+            self.ping_thread.requestInterruption()
+            self.ping_thread.wait(1500)
+        if self.scan_thread and self.scan_thread.isRunning():
+            self.scan_thread.wait(1500)
+        self.bridge.stop()
+        super().closeEvent(e)
 
     def theme_mode(self):
         if self.cfg["theme"]=="auto":
@@ -721,6 +828,10 @@ class MainWindow(QMainWindow):
         qss=f"""
         QMainWindow{{background:transparent}}
         #central{{background:{bg};border-radius:26px}}
+        #menurow{{background:transparent}}
+        QMenuBar{{background:transparent;color:{fg3};font-size:12px;padding:0 2px}}
+        QMenuBar::item{{padding:3px 9px;border-radius:7px}}
+        QMenuBar::item:selected{{background:{soft_hover};color:{fg}}}
         #glass{{background:transparent}}
         #bar,#gridw{{background:transparent}}
         #chip{{background:{chip_bg};border-radius:32px}}
