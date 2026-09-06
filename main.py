@@ -584,6 +584,7 @@ class MainWindow(QMainWindow):
             return b
 
         self.author_btn=rbtn("✈",self.open_author,"Автор @yetilov")
+        self.theme_btn=rbtn("🎨",self.cycle_theme,"Сменить тему (авто → тёмная → светлая)","win",34)
         self.min_btn=rbtn("—",self.showMinimized,"Свернуть","win",34)
         self.close_btn=rbtn("✕",self.close,"Закрыть","win",34)
         bar_widget=QWidget()
@@ -695,6 +696,16 @@ class MainWindow(QMainWindow):
         m_view.addAction(mt_a)
         m_view.addAction(sk_a)
         m_view.addSeparator()
+        m_theme=m_view.addMenu("Тема")
+        self._theme_actions={}
+        for label,mode in (("Как в системе","auto"),("Тёмная","dark"),("Светлая","light")):
+            a=QAction(label,self)
+            a.setCheckable(True)
+            a.triggered.connect(lambda _,md=mode:self.set_theme(md))
+            m_theme.addAction(a)
+            self._theme_actions[mode]=a
+        self._sync_theme_menu()
+        m_view.addSeparator()
         refresh_a=QAction("Обновить прокси",self)
         refresh_a.setShortcut("F5")
         refresh_a.triggered.connect(self.start_scan)
@@ -774,6 +785,25 @@ class MainWindow(QMainWindow):
         dlg=SettingsDialog(self,self.cfg)
         dlg.applied.connect(self.on_settings)
         dlg.exec()
+
+    def cycle_theme(self):
+        order=["auto","dark","light"]
+        self.set_theme(order[(order.index(self.cfg["theme"])+1)%3])
+
+    def set_theme(self,mode):
+        if self.cfg["theme"]!=mode:
+            self.cfg["theme"]=mode
+            save_config(self.cfg)
+            self._apply_style()
+        self._sync_theme_menu()
+
+    def _sync_theme_menu(self):
+        icons={"auto":"◐","dark":"🌙","light":"☀️"}
+        for md,a in getattr(self,"_theme_actions",{}).items():
+            a.setChecked(self.cfg["theme"]==md)
+        if hasattr(self,"theme_btn") and self.theme_btn is not None:
+            self.theme_btn.setText(icons.get(self.cfg["theme"],"◐"))
+            self.theme_btn.setToolTip(f"Тема: {self.cfg['theme']} — клик переключит")
 
     def on_settings(self,cfg):
         self.cfg=cfg
@@ -894,6 +924,7 @@ class MainWindow(QMainWindow):
         for w in QApplication.topLevelWidgets():
             if w is not self:
                 w.setStyleSheet(qss)
+        self._sync_theme_menu()
 
     def show_info(self):
         QMessageBox.information(self,"О пинге",self.INFO_TEXT)
