@@ -21,7 +21,7 @@ jobs:
         run: |
           cd ios
           xcodebuild -project MTProtoFinder.xcodeproj \
-            -target MTProtoFinder \
+            -scheme MTProtoFinder \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath ../build/ios \
