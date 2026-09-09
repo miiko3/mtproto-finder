@@ -1,8 +1,8 @@
 import Foundation
 import Network
 
-let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "1.0.0"
+let AUTHOR_URL = "https://t.me/miiko3"
+let APP_VERSION = "1.0.1"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -194,8 +194,14 @@ final class ProxyModel: ObservableObject {
         let lower = p.secret.lowercased()
         if lower.hasPrefix("ee") {
             for sni in sniCandidates(secret: p.secret, host: p.host) {
-                let ms = await tlsPing(host: p.host, port: p.port, sni: sni)
-                if ms > 0 { return (ms, true, "FakeTLS · \(sni)") }
+                switch await fakeTLSPing(host: p.host, port: p.port, secret: p.secret, sni: sni) {
+                case .success(let ms):
+                    return (ms, true, "FakeTLS · \(sni) · ResPQ ok")
+                case .notMTProto:
+                    return (-2.0, false, "")
+                case .tlsFailed:
+                    continue
+                }
             }
             return (-2.0, false, "")
         }

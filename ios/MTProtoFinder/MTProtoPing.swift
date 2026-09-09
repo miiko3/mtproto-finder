@@ -113,18 +113,29 @@ private func obfuscatedInit(tag: [UInt8], dcID: UInt16) -> [UInt8]? {
     return nil
 }
 
+private func decodeHex(_ s: String) -> [UInt8]? {
+    var out = [UInt8]()
+    var i = s.startIndex
+    while i < s.index(before: s.endIndex) {
+        let next = s.index(after: i)
+        guard let b = UInt8(String(s[i...next]), radix: 16) else { return nil }
+        out.append(b)
+        i = s.index(after: next)
+    }
+    return out
+}
+
+/// Same as localproxy.py `_secret_bytes`: FakeTLS secrets start with a 0xEE
+/// marker byte, so the crypto key is the 16 bytes *after* it.
 private func mtprotoSecretBytes(_ secret: String) -> Data? {
     var h = secret.lowercased()
     if h.hasPrefix("dd"), h.count == 34 { h = String(h.dropFirst(2)) }
-    if h.count > 32 { h = String(h.prefix(32)) }
-    var bytes = [UInt8]()
-    var i = h.startIndex
-    while bytes.count < 16, i < h.index(before: h.endIndex) {
-        let next = h.index(after: i)
-        if let b = UInt8(String(h[i...next]), radix: 16) { bytes.append(b) } else { break }
-        i = h.index(after: next)
+    guard h.count % 2 == 0, h.count >= 2, var bytes = decodeHex(h) else { return nil }
+    if bytes.count >= 17, bytes[0] == 0xEE {
+        bytes = Array(bytes.dropFirst(1).prefix(16))
     }
-    return bytes.count >= 16 ? Data(bytes.prefix(16)) : nil
+    guard bytes.count >= 16 else { return nil }
+    return Data(bytes.prefix(16))
 }
 
 private func consumeFrame(_ data: Data, framing: ObfFraming) -> (used: Int, offset: Int)? {
@@ -317,4 +328,119 @@ func sniCandidates(secret: String, host: String) -> [String] {
         }
     }
     return out
+}
+
+// MARK: - FakeTLS (ee...) real MTProto probe inside TLS
+
+enum FakeTLSProbeResult {
+    case success(Double)
+    case tlsFailed
+    case notMTProto
+}
+
+/// Ported from localproxy.py `_ssl_obf_ping`: establishes a real TLS tunnel to
+/// the SNI embedded in the secret, then performs the full obfuscated2 MTProto
+/// handshake (obf2 header + req_pq_multi) and validates the ResPQ nonce.
+/// A plain TLS handshake is NOT enough to certify a FakeTLS proxy.
+func fakeTLSPing(host: String, port: Int, secret: String, sni: String, timeout: Double = 4.0) async -> FakeTLSProbeResult {
+    await withCheckedContinuation { cont in
+        guard let portV = NWEndpoint.Port(rawValue: UInt16(port)),
+              let secretData = mtprotoSecretBytes(secret),
+              let initBytes = obfuscatedInit(tag: [0xEF, 0xEF, 0xEF, 0xEF], dcID: 2) else {
+            cont.resume(returning: .tlsFailed); return
+        }
+        let framing: ObfFraming = .abridged
+
+        let region = Data(initBytes[8..<56])
+        let regionArr = [UInt8](region)
+        let rev = Array(regionArr.reversed())
+        let fk = Data(SHA256.hash(data: Data(regionArr[0..<32]) + secretData))
+        let fiv = [UInt8](region[32..<48])
+        let rk = Data(SHA256.hash(data: Data(rev[0..<32]) + secretData))
+        let riv = [UInt8](rev[32..<48])
+
+        let enc = ObfCipher(key: fk, iv: fiv)
+        let full = enc.update(Data(initBytes))
+        let head = Data(initBytes.prefix(56)) + full.dropFirst(56)
+
+        let nonce = (0..<16).map { _ in UInt8.random(in: 0...255) }
+        let nonceData = Data(nonce)
+
+        var body = Data()
+        withUnsafeBytes(of: UInt32(0xBE7E8EF1).littleEndian) { body.append(contentsOf: $0) }
+        body.append(contentsOf: nonce)
+        body.append(Data(count: 160))
+
+        var frame = Data([UInt8(body.count / 4)])
+        frame.append(body)
+
+        let packet = head + enc.update(frame)
+
+        let tlsOpts = NWProtocolTLS.Options()
+        sec_protocol_options_set_tls_server_name(tlsOpts.securityProtocolOptions, sni)
+        sec_protocol_options_set_verify_block(tlsOpts.securityProtocolOptions, { _, _, complete in
+            complete(true)
+        }, nil)
+        let params = NWParameters(tls: tlsOpts)
+        let conn = NWConnection(to: NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: portV), using: params)
+        let queue = DispatchQueue(label: "mtprotofinder.faketls")
+        let once = Once()
+        let start = Date()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + max(1.5, timeout))
+
+        var recvBuf = Data()
+        let dec = ObfCipher(key: rk, iv: riv)
+        var readyReached = false
+
+        let finish: (Double, Bool) -> Void = { ms, ok in
+            once.fire {
+                timer.cancel()
+                conn.cancel()
+                if ok {
+                    cont.resume(returning: .success(ms))
+                } else if readyReached {
+                    cont.resume(returning: .notMTProto)
+                } else {
+                    cont.resume(returning: .tlsFailed)
+                }
+            }
+        }
+        timer.setEventHandler { finish(-2.0, false) }
+        timer.resume()
+
+        func receiveMore() {
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, error in
+                guard let data, !data.isEmpty, error == nil else {
+                    finish(-2.0, false); return
+                }
+                recvBuf.append(dec.update(data))
+                if let ok = parseResPQ(recvBuf, framing: framing, nonce: nonceData) {
+                    let ms = Date().timeIntervalSince(start) * 1000
+                    finish(ok ? ms : -2.0, ok)
+                } else {
+                    receiveMore()
+                }
+            }
+        }
+
+        conn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                readyReached = true
+                conn.send(content: packet, completion: .contentProcessed { error in
+                    if error != nil {
+                        finish(-2.0, false)
+                    } else {
+                        receiveMore()
+                    }
+                })
+            case .failed, .cancelled:
+                finish(-2.0, false)
+            default:
+                break
+            }
+        }
+        conn.start(queue: queue)
+    }
 }

@@ -3,11 +3,14 @@
 SwiftUI-приложение: поиск MTProto/SOCKS5 прокси для Telegram с настоящей проверкой пинга.
 
 ## Особенности
-- **Liquid Glass (iOS 26)**: `glassEffect(.regular)`, стеклянный док, морфинг переключателя, кастомный `GlassButtonStyle` на `glassEffect`. Живой aurora-фон.
+- **Liquid Glass (iOS 26)**: `glassEffect(.regular)`, максимальные скругления-пиллы, усиленный blur, стеклянный док, кастомные `GlassButtonStyle`/`AccentButtonStyle` с пружинной анимацией нажатия.
+- **Палитра из иконки**: графитовый монохром извлечён из `Frame 30.png` (AppIcon), UI — серое стекло с синим акцентом `#0A84FF`.
+- **Адаптивный макет**: на iPad — центрированная колонка и сетка в 3 колонки, на iPhone — 2.
 - **Честный MTProto-пинг**: обычные MTProto-прокси проверяются реальным obfuscated2-хендшейком `req_pq_multi` → `ResPQ` (`MTProtoPing.swift`, AES-CTR через CommonCrypto/CryptoKit).
-- **FakeTLS** (секреты `ee…`): TLS-пинг по SNI, извлечённому из секрета (+ хост + fallback `www.cloudflare.com`).
+- **FakeTLS** (секреты `ee…`): полный MTProto-пинг (`req_pq_multi` → `ResPQ`) **внутри** TLS-туннеля по SNI, извлечённому из секрета (+ хост + fallback `www.cloudflare.com`).
 - **SOCKS5**: полный CONNECT-хендшейк, живым считается только сервер, подтвердивший `05 00` на оба этапа.
 - Подключение/копирование через `tg://proxy` / `tg://socks`, тёмная тема.
+- MTProto и SOCKS5 — отдельные кнопки переключения с анимацией нажатия.
 
 ## Статус
 Сборка .ipa возможна только на macOS с Xcode 26. На iOS 25 и ниже интерфейс Liquid Glass недоступен (deployment target — iOS 26).

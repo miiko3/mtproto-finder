@@ -1,23 +1,58 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Palette (графит из AppIcon Frame 30.png) + акцент
+
+enum AppPalette {
+    static let baseDeep      = Color(red: 0.08, green: 0.08, blue: 0.09)   // #151517
+    static let baseMid       = Color(red: 0.12, green: 0.12, blue: 0.13)   // #1F1F21
+    static let graphite      = Color(red: 0.36, green: 0.36, blue: 0.36)   // #5C5C5C (avg иконки)
+    static let graphiteSoft  = Color(red: 0.44, green: 0.44, blue: 0.44)   // #707070
+    static let graphiteLight = Color(red: 0.55, green: 0.55, blue: 0.55)   // #8C8C8C
+    static let graphiteFaint = Color(red: 0.72, green: 0.72, blue: 0.72)   // #B8B8B8
+    static let accent        = Color(red: 0.04, green: 0.52, blue: 1.00)   // #0A84FF
+    static let accentSoft    = Color(red: 0.04, green: 0.52, blue: 1.00).opacity(0.30)
+    static let good          = Color(red: 0.30, green: 0.90, blue: 0.55)
+    static let mid           = Color(red: 0.98, green: 0.83, blue: 0.22)
+    static let bad           = Color(red: 1.00, green: 0.36, blue: 0.40)
+}
+
+extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition { transform(self) } else { self }
+    }
+}
+
 // MARK: - Glass primitives
 
 struct GlassCard: ViewModifier {
-    var cornerRadius: CGFloat = 27
+    var cornerRadius: CGFloat = 28
     func body(content: Content) -> some View {
         content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
     }
 }
 
-struct GlassButtonStyle: ButtonStyle {
-    var prominent = false
-
+struct SqueezeButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.95
+    var dim: Double = 0.85
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .opacity(configuration.isPressed ? dim : 1)
+            .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
+    }
+}
+
+struct GlassButtonStyle: ButtonStyle {
+    var prominent = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .brightness(configuration.isPressed ? -0.06 : (prominent ? 0.05 : 0))
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
             .glassEffect(.regular, in: .capsule)
-            .brightness(configuration.isPressed ? -0.05 : (prominent ? 0.06 : 0))
-            .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }
 
@@ -28,24 +63,37 @@ struct GlassButton: ViewModifier {
     }
 }
 
-// MARK: - Aurora background
+struct AccentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Capsule().fill(
+                    LinearGradient(colors: [AppPalette.accent, AppPalette.accent.opacity(0.80)],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+            )
+            .shadow(color: AppPalette.accent.opacity(configuration.isPressed ? 0.12 : 0.45),
+                    radius: configuration.isPressed ? 4 : 14, y: configuration.isPressed ? 1 : 4)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Graphite background (цвета иконки + лёгкий акцент)
 
 struct LiquidBackground: View {
     @State private var animating = false
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.14, green: 0.12, blue: 0.19),
-                         Color(red: 0.09, green: 0.11, blue: 0.17),
-                         Color(red: 0.08, green: 0.09, blue: 0.14)],
-                startPoint: .top, endPoint: .bottom
-            )
+            LinearGradient(colors: [AppPalette.baseMid, AppPalette.baseDeep,
+                                    Color(red: 0.06, green: 0.06, blue: 0.07)],
+                           startPoint: .top, endPoint: .bottom)
             orbs
         }
         .ignoresSafeArea()
         .onAppear {
-            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 16).repeatForever(autoreverses: true)) {
                 animating = true
             }
         }
@@ -53,12 +101,14 @@ struct LiquidBackground: View {
 
     private var orbs: some View {
         ZStack {
-            orb(Color(red: 0.62, green: 0.30, blue: 0.85).opacity(0.45), radius: 190,
-                offset: animating ? CGSize(width: 150, height: -180) : CGSize(width: -130, height: 130))
-            orb(Color(red: 0.18, green: 0.75, blue: 0.78).opacity(0.30), radius: 220,
-                offset: animating ? CGSize(width: -170, height: 160) : CGSize(width: 150, height: -150))
-            orb(Color(red: 0.95, green: 0.40, blue: 0.55).opacity(0.28), radius: 170,
-                offset: animating ? CGSize(width: 60, height: 100) : CGSize(width: -90, height: -70))
+            orb(AppPalette.graphiteSoft.opacity(0.32), radius: 210,
+                offset: animating ? CGSize(width: 160, height: -210) : CGSize(width: -140, height: 150))
+            orb(AppPalette.graphiteLight.opacity(0.16), radius: 250,
+                offset: animating ? CGSize(width: -190, height: 190) : CGSize(width: 160, height: -170))
+            orb(AppPalette.accent.opacity(0.13), radius: 220,
+                offset: animating ? CGSize(width: 90, height: 130) : CGSize(width: -120, height: -90))
+            orb(AppPalette.graphite.opacity(0.20), radius: 180,
+                offset: animating ? CGSize(width: -70, height: -130) : CGSize(width: 70, height: 90))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -67,7 +117,7 @@ struct LiquidBackground: View {
         Circle()
             .fill(color)
             .frame(width: radius * 2, height: radius * 2)
-            .blur(radius: radius * 0.85)
+            .blur(radius: radius * 0.95)
             .offset(offset)
     }
 }
@@ -94,11 +144,11 @@ struct PingBadge: View {
     }
 
     private var indicatorColor: Color {
-        if proxy.isGood { return Color(red: 0.22, green: 0.92, blue: 0.48) }
-        if proxy.isMid { return Color(red: 0.98, green: 0.85, blue: 0.12) }
-        if proxy.isBad { return Color(red: 1.0, green: 0.34, blue: 0.40) }
+        if proxy.isGood { return AppPalette.good }
+        if proxy.isMid { return AppPalette.mid }
+        if proxy.isBad { return AppPalette.bad }
         if proxy.ping == -1 { return Color.white.opacity(0.45) }
-        return Color.secondary.opacity(0.6)
+        return AppPalette.graphiteFaint.opacity(0.6)
     }
 }
 
@@ -125,7 +175,7 @@ struct ProxyCard: View {
                 if !proxy.note.isEmpty && proxy.valid {
                     Text(proxy.note)
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(AppPalette.graphiteFaint.opacity(0.85))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -136,41 +186,44 @@ struct ProxyCard: View {
             .frame(minHeight: 54)
             .modifier(GlassCard(cornerRadius: 26))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SqueezeButtonStyle(scale: 0.96))
     }
 }
 
-// MARK: - Mode picker
+// MARK: - Mode switch (две отдельные кнопки MTProto / SOCKS5)
 
-struct ProxyModePicker: View {
+struct ModeSwitch: View {
     @Binding var mode: String
-    @Namespace private var pill
 
-    private let items = [("mtproto", "MTProto"), ("socks5", "SOCKS5")]
+    private let items: [(key: String, label: String, icon: String)] = [
+        ("mtproto", "MTProto", "bolt.fill"),
+        ("socks5", "SOCKS5", "network")
+    ]
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(items, id: \.0) { key, label in
+        HStack(spacing: 5) {
+            ForEach(items, id: \.key) { item in
                 Button {
-                    withAnimation(.snappy(duration: 0.28)) { mode = key }
+                    withAnimation(.snappy(duration: 0.26)) { mode = item.key }
                 } label: {
-                    Text(label)
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundColor(mode == key ? .primary : Color.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background {
-                            if mode == key {
-                                Capsule()
-                                    .fill(.white.opacity(0.16))
-                                    .matchedGeometryEffect(id: "pill", in: pill)
-                            }
-                        }
+                    HStack(spacing: 6) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 12, weight: .bold))
+                        Text(item.label)
+                            .font(.system(size: 13, weight: .heavy))
+                    }
+                    .foregroundColor(mode == item.key ? .white : AppPalette.graphiteFaint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(mode == item.key ? Capsule().fill(AppPalette.accent) : nil)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SqueezeButtonStyle(scale: 0.94))
+                .if(mode != item.key) { view in
+                    view.glassEffect(.regular, in: .capsule)
+                }
             }
         }
-        .padding(4)
+        .padding(5)
         .modifier(GlassCard(cornerRadius: 999))
     }
 }
@@ -190,7 +243,7 @@ struct StatusChip: View {
             }
             Text(text)
                 .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(AppPalette.graphiteFaint.opacity(0.9))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
@@ -211,12 +264,19 @@ struct DockBar: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Label(proxy.endpoint, systemImage: proxy.proto == "socks5" ? "network" : "bolt.fill")
+                Image(systemName: proxy.proto == "socks5" ? "network" : "bolt.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(proxy.valid ? AppPalette.accent : AppPalette.graphiteFaint.opacity(0.7))
+                Text(proxy.endpoint)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                 Spacer()
-                if !proxy.valid {
+                if proxy.valid {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(AppPalette.good)
+                } else {
                     Text("нет ответа")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
@@ -228,22 +288,23 @@ struct DockBar: View {
                 } label: {
                     Label("Подключиться", systemImage: "link")
                         .font(.system(size: 14, weight: .heavy))
+                        .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
-                .modifier(GlassButton(prominent: true))
+                .buttonStyle(AccentButtonStyle())
 
                 Button {
                     onCopy()
                 } label: {
                     Label(copied ? "Скопировано" : "Ссылка", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
-                .modifier(GlassButton())
+                .buttonStyle(GlassButtonStyle())
             }
-            .foregroundColor(.primary)
         }
         .padding(12)
         .modifier(GlassCard(cornerRadius: 30))

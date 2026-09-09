@@ -4,6 +4,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var model = ProxyModel()
     @Environment(\.openURL) private var openURL
+    @Environment(\.horizontalSizeClass) private var hSize
     @State private var copied = false
 
     var body: some View {
@@ -11,7 +12,7 @@ struct ContentView: View {
             LiquidBackground()
             VStack(spacing: 14) {
                 header
-                ProxyModePicker(mode: $model.mode)
+                ModeSwitch(mode: $model.mode)
                 proxyList
                 StatusChip(text: model.status, busy: model.isSearching)
                 if let sel = model.top.first {
@@ -23,6 +24,8 @@ struct ContentView: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 6)
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
         }
         .preferredColorScheme(.dark)
         .task { await model.start() }
@@ -36,11 +39,12 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)
                     .background(
-                        LinearGradient(colors: [Color(red: 0.88, green: 0.33, blue: 0.62),
-                                                 Color(red: 0.56, green: 0.18, blue: 0.38)],
+                        LinearGradient(colors: [AppPalette.graphiteLight,
+                                                 AppPalette.graphite],
                                        startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
                     .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(AppPalette.accent.opacity(0.55), lineWidth: 1.5))
                 VStack(alignment: .leading, spacing: 0) {
                     Text("MTProto Finder").font(.system(size: 18, weight: .heavy))
                         .foregroundColor(.primary)
@@ -64,6 +68,11 @@ struct ContentView: View {
         }
     }
 
+    private var columns: [GridItem] {
+        let count = hSize == .regular ? 3 : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 10), count: count)
+    }
+
     private var proxyList: some View {
         ScrollView {
             if model.top.isEmpty {
@@ -74,10 +83,7 @@ struct ContentView: View {
                 )
                 .frame(minHeight: 300)
             } else {
-                LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                    spacing: 10
-                ) {
+                LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(model.top) { proxy in
                         ProxyCard(proxy: proxy) {
                             if let url = proxy.tgURL { openURL(url) }

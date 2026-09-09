@@ -1,8 +1,8 @@
 # ⚡ MTProto Finder
 
-[![Author](https://img.shields.io/badge/author-%40yetilov-blue)](https://t.me/yetilov)
+[![Author](https://img.shields.io/badge/author-%40miiko3-blue)](https://t.me/miiko3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.3-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.4-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -37,7 +37,7 @@ chmod +x MTProto-Finder-x86_64.AppImage
   (7 MTProto + 8 SOCKS5), всё параллельно, через CDN-зеркала jsDelivr.
 - **Проверка** — по каждому серверу делается полноценное рукопожатие:
   - MTProto: реальный запрос `req_pq_multi` и ответ от Telegram-DC;
-  - FakeTLS: TLS ClientHello с SNI, зашитым в секрет;
+  - FakeTLS: полный MTProto-протокол (`req_pq_multi` → `ResPQ`) внутри TLS-туннеля по SNI, зашитому в секрет;
   - SOCKS5: полный CONNECT-запрос через прокси.
 - **Бейджи пинга**: 🟢 до 300 мс · 🟡 до 1000 мс · 🔴 выше.
   Серый `✖` — TCP отвечает, но MTProto не работает: в Telegram такой
@@ -51,7 +51,7 @@ chmod +x MTProto-Finder-x86_64.AppImage
 - 🚀 Подключение в один клик: двойной клик по карточке, Enter или кнопка «Подключиться» — прокси открывается в Telegram
 - 📋 Контекстное меню карточки: подключиться, скопировать ссылку или адрес; на Android — долгий тап
 - ⌨ Менюбар с горячими клавишами: `Ctrl+1/2` — тип прокси, `F5` — обновить, `Ctrl+,` — настройки, `F1` — справка
-- 🌸 Фиолетовый glass-интерфейс: безрамочное окно, тёмная и светлая темы, свой цвет акцента
+- 🧊 Графитовый glass-интерфейс в цвет иконки: безрамочное окно, тёмная тема, синий акцент, blur-стекло
 - 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер; работает и с FakeTLS-прокси (нативный TLS или record-обёртка), на Android то же самое
 - 🚙 Автозапуск при входе в систему (`./install_autostart.sh`)
 - 📴 Сам следит за интернетом: пропала сеть — пересканирует через 15 секунд
@@ -98,7 +98,24 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 |---|---|---|
 | Linux (AppImage) | 1.4.3 | ✅ стабильная |
 | Android (APK) | 0.1.3.5b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 1.0.0 | 🚧 пре-альфа, сборка unsigned через GitHub Actions |
+| iOS (SwiftUI, Liquid Glass) | 1.0.1 | 🧪 бета, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.4 (iOS 1.0.1)
+
+- 🎨 **Интерфейс в цвет иконки**: палитра извлечена из `Frame 30.png`
+  (графитовый монохром), UI перекрашен в серое стекло + синий акцент
+  `#0A84FF`; AppIcon приложения заменён на `Frame 30.png`.
+- 🧊 **Liquid Glass как в iOS 26**: максимальные скругления-пиллы, усиленный
+  blur, графитовый фон с дрейфующими шарами, плавающий стеклянный док.
+- 🎛 **Отдельные кнопки MTProto | SOCKS5** с пружинной анимацией нажатия
+  (масштаб/свечение); активный тип — залитая акцентом капсула.
+- 📐 **Адаптивный макет**: на iPad — центрированная колонка ~640pt и сетка
+  в 3 колонки, на iPhone — 2 колонки.
+- 🔒 **Честный пинг FakeTLS на iOS**: ee-прокси теперь проверяются полным
+  MTProto-рукопожатием (`req_pq_multi` → `ResPQ`) **внутри** TLS-туннеля по
+  SNI из секрета. Раньше «живым» числился любой TLS-сервер — такие прокси
+  отображались с пингом, но в Telegram были недоступны.
+- 🏷 Версия приложения iOS — **1.0.1**.
 
 ## Что нового в 1.4.3
 
@@ -127,7 +144,7 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 
 ## Автор
 
-**@yetilov** — [t.me/yetilov](https://t.me/yetilov)
+**@miiko3** — [t.me/miiko3](https://t.me/miiko3)
 
 ## Лицензия
 
