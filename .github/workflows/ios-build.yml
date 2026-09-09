@@ -1,0 +1,52 @@
+name: iOS IPA
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: Build unsigned .ipa
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - name: Build (unsigned, Release)
+        run: |
+          cd ios
+          xcodebuild -project MTProtoFinder.xcodeproj \
+            -target MTProtoFinder \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ../build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .ipa
+        run: |
+          mkdir -p ipa/Payload
+          cp -r "build/ios/Build/Products/Release-iphoneos/MTProtoFinder.app" ipa/Payload/
+          cd ipa
+          /usr/bin/ditto -c -k --keepParent Payload MTProtoFinder.ipa
+          ls -lh MTProtoFinder.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MTProtoFinder.ipa
+          path: ipa/MTProtoFinder.ipa
+          if-no-files-found: error
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ipa/MTProtoFinder.ipa
+          generate_release_notes: true

@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40yetilov-blue)](https://t.me/yetilov)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.2-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.3-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -21,7 +21,8 @@ MTProto и SOCKS5 — и показывает их **настоящий пинг
 | Файл | Для |
 |---|---|
 | `MTProto-Finder-x86_64.AppImage` | Linux x86_64, запуск без установки |
-| `MTProto-Finder-v0.1.3.4b.apk` | Android 8+ |
+| `MTProto-Finder-v0.1.3.5b.apk` | Android 8+ |
+| `MTProtoFinder.ipa` | iPhone (iOS 26+), unsigned — для Sideloadly/AltStore |
 
 ```bash
 chmod +x MTProto-Finder-x86_64.AppImage
@@ -95,9 +96,29 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 
 | Платформа | Версия | Статус |
 |---|---|---|
-| Linux (AppImage) | 1.4.2 | ✅ стабильная |
-| Android (APK) | 0.1.3.4b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 0.21pre-alpha | 🚧 пре-альфа, сборка на Mac |
+| Linux (AppImage) | 1.4.3 | ✅ стабильная |
+| Android (APK) | 0.1.3.5b | 🧪 бета |
+| iOS (SwiftUI, Liquid Glass) | 1.0.0 | 🚧 пре-альфа, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.3
+
+- 🛠 **Честный пинг MTProto**: обычные (не FakeTLS) прокси теперь проверяются
+  реальным рукопожатием `req_pq_multi` → `ResPQ` (obfuscated2, AES-CTR),
+  а не «верой» в ответ TCP. Раньше такие серверы могли показываться
+  рабочими, но не подключаться в Telegram.
+- 🔍 **Исправлен пинг FakeTLS**: рабочим считается только прокси, который
+  ответил настоящим MTProto-ответом внутри TLS-туннеля; убран shortcut,
+  из-за которого «живыми» числились любые TLS-серверы.
+- 🤝 **Локальный прокси стал надёжнее**: мост на `127.0.0.1:10811` теперь
+  на каждое подключение сам подбирает лучший проверенный MTProto-сервер,
+  а не замораживает первый на момент запуска; переживает смерть лучшего.
+- 🌊 **iOS 26 (Liquid Glass)**: `glassEffect(.regular)`, `buttonStyle(.glass/.glassProminent)`,
+  живой aurora-фон, морфинг переключателя MTProto|SOCKS5, плавающий
+  стеклянный док. Deployment target поднят до iOS 26, версия приложения — 1.0.0.
+- 🏭 **Готовые `.ipa` через GitHub Actions**: пуш тега `v*` автоматически
+  собирает unsigned `.ipa` (Xcode 26, macOS runner) и крепит его к Release —
+  подпишите локально через Sideloadly/AltStore и ставьте на iPhone.
+- 📄 Подробный ревью изменений — в описании коммита `v1.4.3`.
 
 ## Поддержать
 

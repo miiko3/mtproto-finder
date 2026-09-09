@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor,QIcon,QPixmap,QKeySequence,QShortcut,QGuiApplicat
 from PyQt6.QtWidgets import QApplication,QFrame,QGridLayout,QHBoxLayout,QLabel,QMainWindow,QDialog,QMessageBox,QPushButton,QVBoxLayout,QWidget,QColorDialog,QComboBox,QRadioButton,QButtonGroup,QDialogButtonBox,QFormLayout,QScrollArea,QMenuBar,QMenu,QSizePolicy
 
 APP_NAME="MTProto Finder"
-APP_VERSION="1.4.2"
+APP_VERSION="1.4.3"
 AUTHOR_URL="https://t.me/yetilov"
 MT_SOURCES=[
 "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
