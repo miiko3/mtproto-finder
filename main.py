@@ -1129,16 +1129,22 @@ class MainWindow(QMainWindow):
         self._set_status(f"🔗 Открываю {p.host}:{p.port} в Telegram…")
         subprocess.Popen(["xdg-open",p.tg_link])
 
+    def _best_bridge_proxy(self):
+        # Динамический выбор: на каждое подключение локального клиента берётся
+        # лучший на текущий момент проверенный MTProto-прокси. Если лучший
+        # умер или появился более быстрый — мост автоматически переключится.
+        cand=[p for p in self.all_proxies if p.proto=="mtproto" and p.valid and p.ping>0]
+        cand.sort(key=lambda p:p.ping)
+        return cand[0] if cand else None
+
     def toggle_local(self):
         if self.local_btn.isChecked():
-            cand=[p for p in self.all_proxies if p.proto=="mtproto" and p.valid and p.ping>0]
-            cand.sort(key=lambda p:p.ping)
-            p=cand[0] if cand else None
+            p=self._best_bridge_proxy()
             if p is None:
                 self.local_btn.setChecked(False)
                 QMessageBox.warning(self,APP_NAME,"Нет рабочего MTProto-прокси для моста — подождите проверки.")
                 return
-            self.bridge.pick=lambda pp=p:pp
+            self.bridge.pick=self._best_bridge_proxy
             try:
                 self.bridge.start()
             except OSError as e:
@@ -1150,6 +1156,7 @@ class MainWindow(QMainWindow):
             self._set_status(f"🔌 Локальный MTProto на 127.0.0.1:{self.bridge.port} через {p.host}")
             subprocess.Popen(["xdg-open","tg://proxy?server=127.0.0.1&port={}&secret={}".format(self.bridge.port,LOCAL_SECRET.hex())])
         else:
+            self.bridge.pick=None
             self.bridge.stop()
             self.local_btn.setText("Локальный прокси")
             self._set_status("Локальный прокси остановлен")

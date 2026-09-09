@@ -271,7 +271,11 @@ def handshake_ping(proxy, timeout=2.0):
         elif proxy.secret.lower().startswith("ee"):
             from main import _tls_client_hello, _sni_candidates
 
-            flight_ok = False
+            # Честная проверка: только настоящий MTProto-ответ (ResPQ на
+            # req_pq_multi) внутри TLS-туннеля делает прокси "рабочим".
+            # Раньше сертифицировался любой TLS-сервер, ответивший клаштом
+            # ClientHello, — из-за этого мост "Локальный прокси" выбирал
+            # не-MTProto серверы и не работал.
             for dom in _sni_candidates(proxy):
                 try:
                     c = socket.create_connection((proxy.host, proxy.port), timeout=timeout)
@@ -285,12 +289,9 @@ def handshake_ping(proxy, timeout=2.0):
                     d = b""
                 c.close()
                 if len(d) >= 5 and d[0] == 0x16 and d[1] == 0x03:
-                    flight_ok = True
                     if _ssl_obf_ping(proxy, dom, timeout):
                         ok = True
                     break
-            if not ok and flight_ok:
-                ok = True
         else:
             ok = _deep_mtproto_ping(s, proxy.secret, timeout)
     except OSError:

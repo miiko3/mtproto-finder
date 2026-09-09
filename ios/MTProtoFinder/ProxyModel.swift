@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "v0.21pre-alpha"
+let APP_VERSION = "1.0.0"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -30,8 +30,9 @@ struct Proxy: Identifiable {
     let port: Int
     let secret: String
     let proto: String
-    var ping: Double = -1
+    var ping: Double = -1    // -1 in progress, -2 failed, >0 elapsed ms
     var valid: Bool = false
+    var note: String = ""
 
     var endpoint: String { "\(host):\(port)" }
 
@@ -41,9 +42,9 @@ struct Proxy: Identifiable {
     }
 
     var pingText: String {
-        if ping > 0 && valid { return String(format: "%.0f ms", ping) }
-        if ping > 0 { return "✖" }
+        if valid && ping > 0 { return String(format: "%.0f ms", ping) }
         if ping == -2 { return "—" }
+        if ping > 0 { return "✖" }
         return "…"
     }
 
@@ -57,15 +58,27 @@ final class ProxyModel: ObservableObject {
     @Published var top: [Proxy] = []
     @Published var status = "Готов"
     @Published var mode = "mtproto"
+    @Published var isSearching = false
     private var all: [Proxy] = []
     private var pingTask: Task<Void, Never>?
 
     func start() async {
-        status = "🔍 Поиск прокси…"
+        status = "Поиск прокси…"
+        isSearching = true
         all = await Self.fetchAll()
-        status = "Найдено \(all.count) прокси, измеряю пинг…"
+        status = "Найдено \(all.count) прокси, проверяю пинг…"
         refresh()
         pingTask = Task { await pingLoop() }
+    }
+
+    func restart() {
+        pingTask?.cancel()
+        pingTask = nil
+        all = []
+        top = []
+        status = "Поиск прокси…"
+        isSearching = true
+        Task { await start() }
     }
 
     func pool() -> [Proxy] {
@@ -83,6 +96,7 @@ final class ProxyModel: ObservableObject {
             } else {
                 targets = Array(untested.prefix(48))
             }
+            await MainActor.run { self.isSearching = !untested.isEmpty }
             await withTaskGroup(of: Void.self) { group in
                 for p in targets {
                     group.addTask {
@@ -91,6 +105,7 @@ final class ProxyModel: ObservableObject {
                             if let i = self.all.firstIndex(where: { $0.id == p.id }) {
                                 self.all[i].ping = r.0
                                 self.all[i].valid = r.1
+                                self.all[i].note = r.2
                             }
                         }
                     }
@@ -109,11 +124,15 @@ final class ProxyModel: ObservableObject {
         top = Array((valid + un + dead).prefix(MAX_SERVERS))
         let live = valid.count
         if live > 0 {
-            status = "✅ Рабочих прокси: \(live)"
+            status = "Рабочих прокси: \(live) · проверено \(top.count)"
+        } else if un.isEmpty {
+            status = "Живых прокси не найдено"
         } else {
-            status = "📶 Измеряю пинг…"
+            status = "Проверяю пинг… осталось \(un.count)"
         }
     }
+
+    // MARK: - Parsing
 
     static func normalize(_ sec: String) -> String? {
         let s = sec.trimmingCharacters(in: .whitespaces)
@@ -145,7 +164,7 @@ final class ProxyModel: ObservableObject {
                 }
             }
         }
-        for url in SOCK_SOURCES {
+        for url in SOCKS_SOURCES {
             guard let (data, _) = try? await URLSession.shared.data(from: URL(string: url)!) else { continue }
             let text = String(decoding: data, as: UTF8.self)
             for lineRaw in text.split(separator: "\n").prefix(2000) {
@@ -165,16 +184,23 @@ final class ProxyModel: ObservableObject {
         return result
     }
 
-    static func probe(_ p: Proxy) async -> (Double, Bool) {
+    // MARK: - Pings
+
+    static func probe(_ p: Proxy) async -> (Double, Bool, String) {
         if p.proto == "socks5" {
-            let ms = await tcpPing(host: p.host, port: p.port)
-            return (ms, false)
+            let (ms, ok) = await socksProbe(host: p.host, port: p.port)
+            return (ms, ok, ok ? "SOCKS5 · CONNECT ok" : "")
         }
-        let domain = domainFromSecret(p.secret)
-        let ms = await tlsPing(host: p.host, port: p.port, sni: domain)
-        if ms > 0 { return (ms, true) }
-        let fallback = await tlsPing(host: p.host, port: p.port, sni: p.host)
-        return (fallback, fallback > 0)
+        let lower = p.secret.lowercased()
+        if lower.hasPrefix("ee") {
+            for sni in sniCandidates(secret: p.secret, host: p.host) {
+                let ms = await tlsPing(host: p.host, port: p.port, sni: sni)
+                if ms > 0 { return (ms, true, "FakeTLS · \(sni)") }
+            }
+            return (-2.0, false, "")
+        }
+        let (ms, ok) = await deepMTProtoPing(host: p.host, port: p.port, secret: p.secret)
+        return (ms, ok, ok ? "MTProto · ResPQ ok" : "")
     }
 
     static func domainFromSecret(_ sec: String) -> String {
@@ -192,21 +218,21 @@ final class ProxyModel: ObservableObject {
         return domain.contains(".") && domain.count >= 4 ? domain : "www.cloudflare.com"
     }
 
-    static func tlsPing(host: String, port: Int, sni: String) async -> Double {
+    static func tlsPing(host: String, port: Int, sni: String, timeout: Double = 4.0) async -> Double {
         await withCheckedContinuation { cont in
             let start = Date()
             guard let portV = NWEndpoint.Port(rawValue: UInt16(port)) else {
                 cont.resume(returning: -2); return
             }
-            let params = NWParameters.tls
             let tlsOpts = NWProtocolTLS.Options()
             sec_protocol_options_set_tls_server_name(tlsOpts.securityProtocolOptions, sni)
-            params.defaultProtocolStack.transportProtocols = [tlsOpts]
+            let params = NWParameters(tls: tlsOpts)
+            params.allowLocalEndpointResolution = true
             let conn = NWConnection(to: NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: portV), using: params)
             let once = Once()
-            let queue = DispatchQueue(label: "tlsPing")
+            let queue = DispatchQueue(label: "mtprotofinder.tls")
             let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(deadline: .now() + 5)
+            timer.schedule(deadline: .now() + timeout)
             timer.setEventHandler { [weak conn] in
                 once.fire {
                     timer.cancel()
@@ -278,6 +304,66 @@ final class ProxyModel: ObservableObject {
                 close(sock)
                 cont.resume(returning: sel > 0 ? Date().timeIntervalSince(start) * 1000 : -2)
             }
+        }
+    }
+
+    /// Real SOCKS5 probe: greeting (05 01 00) + CONNECT to the proxy's own
+    /// endpoint. Valid only when the server replies 05 00 to both.
+    static func socksProbe(host: String, port: Int, timeout: Double = 5.0) async -> (Double, Bool) {
+        await withCheckedContinuation { cont in
+            guard let portV = NWEndpoint.Port(rawValue: UInt16(port)), portV.rawValue <= 65535 else {
+                cont.resume(returning: (-2.0, false)); return
+            }
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: portV, using: .tcp)
+            let queue = DispatchQueue(label: "mtprotofinder.socks")
+            let once = Once()
+            let start = Date()
+
+            let name = Array(host.utf8)
+            guard name.count >= 1, name.count <= 255 else {
+                cont.resume(returning: (-2.0, false)); return
+            }
+            var req = Data([0x05, 0x01, 0x00, 0x03, UInt8(name.count)])
+            req.append(contentsOf: name)
+            req.append(contentsOf: [UInt8(port >> 8), UInt8(port & 0xFF)])
+
+            func done(_ ms: Double, _ ok: Bool) {
+                once.fire {
+                    conn.cancel()
+                    cont.resume(returning: (ms, ok))
+                }
+            }
+
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + timeout)
+            timer.setEventHandler { done(-2.0, false) }
+            timer.resume()
+
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    conn.send(content: Data([0x05, 0x01, 0x00]), completion: .contentProcessed { _ in
+                        conn.receive(minimumIncompleteLength: 2, maximumLength: 2048) { data, _, _, error in
+                            guard let d = data, error == nil, d.count >= 2, d[0] == 0x05, d[1] == 0x00 else {
+                                done(-2.0, false); return
+                            }
+                            conn.send(content: req, completion: .contentProcessed { _ in
+                                conn.receive(minimumIncompleteLength: 2, maximumLength: 4096) { data2, _, _, err2 in
+                                    guard let d2 = data2, err2 == nil, d2.count >= 2, d2[0] == 0x05, d2[1] == 0x00 else {
+                                        done(-2.0, false); return
+                                    }
+                                    done(Date().timeIntervalSince(start) * 1000, true)
+                                }
+                            })
+                        }
+                    })
+                case .failed, .cancelled:
+                    done(-2.0, false)
+                default:
+                    break
+                }
+            }
+            conn.start(queue: queue)
         }
     }
 }
