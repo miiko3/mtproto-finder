@@ -227,7 +227,6 @@ final class ProxyModel: ObservableObject {
             let tlsOpts = NWProtocolTLS.Options()
             sec_protocol_options_set_tls_server_name(tlsOpts.securityProtocolOptions, sni)
             let params = NWParameters(tls: tlsOpts)
-            params.allowLocalEndpointResolution = true
             let conn = NWConnection(to: NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: portV), using: params)
             let once = Once()
             let queue = DispatchQueue(label: "mtprotofinder.tls")

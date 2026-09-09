@@ -10,10 +10,21 @@ struct GlassCard: ViewModifier {
     }
 }
 
+struct GlassButtonStyle: ButtonStyle {
+    var prominent = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .glassEffect(.regular, in: .capsule)
+            .brightness(configuration.isPressed ? -0.05 : (prominent ? 0.06 : 0))
+            .opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
 struct GlassButton: ViewModifier {
     var prominent = false
     func body(content: Content) -> some View {
-        content.buttonStyle(prominent ? .glassProminent : .glass)
+        content.buttonStyle(GlassButtonStyle(prominent: prominent))
     }
 }
 
