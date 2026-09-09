@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import CommonCrypto
 import CryptoKit
 import Network
@@ -22,13 +22,14 @@ private let reservedInitPrefixes: [[UInt8]] = [
 private func aesECBEncrypt(key: Data, block: [UInt8]) -> [UInt8] {
     guard block.count == 16 else { return [] }
     var out = [UInt8](repeating: 0, count: 16)
+    let outCount = out.count
     var moved = 0
     let status: CCCryptorStatus = key.withUnsafeBytes { kp in
         block.withUnsafeBytes { ins -> CCCryptorStatus in
             out.withUnsafeMutableBytes { oo in
                 CCCrypt(CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionECBMode),
                         kp.baseAddress, key.count, nil,
-                        ins.baseAddress, block.count, oo.baseAddress, out.count, &moved)
+                        ins.baseAddress, block.count, oo.baseAddress, outCount, &moved)
             }
         }
     }
@@ -37,7 +38,7 @@ private func aesECBEncrypt(key: Data, block: [UInt8]) -> [UInt8] {
 
 /// AES-CTR stream compatible with PyCryptodome's `AES.MODE_CTR` (128-bit
 /// big-endian counter starting at `initial_value`, advanced per 16-byte block).
-private final class ObfCipher {
+private final class ObfCipher: @unchecked Sendable {
     private let key: Data
     private let iv: [UInt8]
     private var counter: UInt64
@@ -70,6 +71,29 @@ private final class ObfCipher {
             counter += 1
         }
         return out
+    }
+}
+
+private final class DeepProbeFinisher: @unchecked Sendable {
+    private let once: Once
+    private let timer: DispatchSourceTimer
+    private let conn: NWConnection
+    private let cont: CheckedContinuation<(Double, Bool), Never>
+
+    init(once: Once, timer: DispatchSourceTimer, conn: NWConnection,
+         cont: CheckedContinuation<(Double, Bool), Never>) {
+        self.once = once
+        self.timer = timer
+        self.conn = conn
+        self.cont = cont
+    }
+
+    func call(_ ms: Double, _ ok: Bool) {
+        once.fire {
+            self.timer.cancel()
+            self.conn.cancel()
+            self.cont.resume(returning: (ms, ok))
+        }
     }
 }
 
@@ -210,26 +234,19 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
         var recvBuf = Data()
         let dec = ObfCipher(key: rk, iv: riv)
 
-        var finish: (_ ms: Double, _ ok: Bool) -> Void = { _, _ in }
-        finish = { ms, ok in
-            once.fire {
-                timer.cancel()
-                conn.cancel()
-                cont.resume(returning: (ms, ok))
-            }
-        }
-        timer.setEventHandler { finish(-2.0, false) }
+        let finish = DeepProbeFinisher(once: once, timer: timer, conn: conn, cont: cont)
+        timer.setEventHandler { finish.call(-2.0, false) }
         timer.resume()
 
         func receiveMore() {
             conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, error in
                 guard let data, !data.isEmpty, error == nil else {
-                    finish(-2.0, false); return
+                    finish.call(-2.0, false); return
                 }
                 recvBuf.append(dec.update(data))
                 if let ok = parseResPQ(recvBuf, framing: framing, nonce: nonceData) {
                     let ms = Date().timeIntervalSince(start) * 1000
-                    finish(ok ? ms : -2.0, ok)
+                    finish.call(ok ? ms : -2.0, ok)
                 } else {
                     receiveMore()
                 }
@@ -241,13 +258,13 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
             case .ready:
                 conn.send(content: packet, completion: .contentProcessed { error in
                     if error != nil {
-                        finish(-2.0, false)
+                        finish.call(-2.0, false)
                     } else {
                         receiveMore()
                     }
                 })
             case .failed, .cancelled:
-                finish(-2.0, false)
+                finish.call(-2.0, false)
             default:
                 break
             }

@@ -14,6 +14,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select newest Xcode
+        run: |
+          XCODE_DIR=$(ls -1d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n1)
+          echo "Using ${XCODE_DIR}"
+          sudo xcode-select -s "${XCODE_DIR}"
+
       - name: Show Xcode
         run: xcodebuild -version
 
