@@ -29,7 +29,12 @@ extension View {
 struct GlassCard: ViewModifier {
     var cornerRadius: CGFloat = 28
     func body(content: Content) -> some View {
-        content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        content
+            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
     }
 }
 

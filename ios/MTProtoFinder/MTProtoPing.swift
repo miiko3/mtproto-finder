@@ -376,14 +376,14 @@ func fakeTLSPing(host: String, port: Int, secret: String, sni: String, timeout: 
 
         let packet = head + enc.update(frame)
 
+        let queue = DispatchQueue(label: "mtprotofinder.faketls")
         let tlsOpts = NWProtocolTLS.Options()
         sec_protocol_options_set_tls_server_name(tlsOpts.securityProtocolOptions, sni)
         sec_protocol_options_set_verify_block(tlsOpts.securityProtocolOptions, { _, _, complete in
             complete(true)
-        }, nil)
+        }, queue)
         let params = NWParameters(tls: tlsOpts)
         let conn = NWConnection(to: NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: portV), using: params)
-        let queue = DispatchQueue(label: "mtprotofinder.faketls")
         let once = Once()
         let start = Date()
         let timer = DispatchSource.makeTimerSource(queue: queue)
