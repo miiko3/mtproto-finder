@@ -52,7 +52,8 @@ enum CipherCheck {
         for i in 0..<8 { initBytes[i] = UInt8(i) }
         var fullInit = initBytes
         fullInit.append(region)
-        fullInit.append(contentsOf: [0xEF, 0xEF, 0xEF, 0xEF, 0x02, 0x00, 0x00, 0x00])
+        let tagBytes: [UInt8] = [0xEF, 0xEF, 0xEF, 0xEF, 0x02, 0x00, 0x00, 0x00]
+        fullInit.append(contentsOf: tagBytes)
         guard fullInit.hexString.lowercased() == Self.INIT_HEX else {
             return (false, "init собран неверно")
         }

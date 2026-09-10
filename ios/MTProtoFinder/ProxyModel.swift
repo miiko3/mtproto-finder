@@ -61,7 +61,8 @@ final class ProxyModel: ObservableObject {
     @Published var isSearching = false
     @Published var cryptoOK: Bool?
     let tunnel = BridgeTunnel(pick: { nil })
-    private var all: [Proxy] = []
+    nonisolated(unsafe) private var all: [Proxy] = []
+    private let allLock = NSLock()
     private var pingTask: Task<Void, Never>?
 
     func start() async {
@@ -73,7 +74,8 @@ final class ProxyModel: ObservableObject {
         tunnel.setPicker { [weak self] in self?.bestBridgeServer() }
         status = "Поиск прокси…"
         isSearching = true
-        all = await Self.fetchAll()
+        let fetched = await Self.fetchAll()
+        allLock.lock(); all = fetched; allLock.unlock()
         status = "Найдено \(all.count) прокси, проверяю пинг…"
         refresh()
         pingTask = Task { await pingLoop() }
@@ -82,7 +84,7 @@ final class ProxyModel: ObservableObject {
     func restart() {
         pingTask?.cancel()
         pingTask = nil
-        all = []
+        allLock.lock(); all = []; allLock.unlock()
         top = []
         status = "Поиск прокси…"
         isSearching = true
@@ -90,12 +92,14 @@ final class ProxyModel: ObservableObject {
     }
 
     func pool() -> [Proxy] {
-        all.filter { $0.proto == mode }
+        allLock.lock(); defer { allLock.unlock() }
+        return all.filter { $0.proto == mode }
     }
 
     /// Лучший рабочий MTProto-сервер для реле туннеля (пул не зависит от mode).
-    func bestBridgeServer() -> Proxy? {
-        all.filter { $0.proto == "mtproto" && $0.valid && $0.ping > 0 }
+    nonisolated func bestBridgeServer() -> Proxy? {
+        allLock.lock(); defer { allLock.unlock() }
+        return all.filter { $0.proto == "mtproto" && $0.valid && $0.ping > 0 }
             .min { $0.ping < $1.ping }
     }
 
@@ -116,11 +120,13 @@ final class ProxyModel: ObservableObject {
                     group.addTask {
                         let r = await Self.probe(p)
                         await MainActor.run {
+                            self.allLock.lock()
                             if let i = self.all.firstIndex(where: { $0.id == p.id }) {
                                 self.all[i].ping = r.0
                                 self.all[i].valid = r.1
                                 self.all[i].note = r.2
                             }
+                            self.allLock.unlock()
                         }
                     }
                 }

@@ -28,10 +28,10 @@ final class BridgeTunnel: ObservableObject {
     @Published var wsFallbackActive = false
 
     private var listener: NWListener?
-    private var pick: () -> Proxy?
+    nonisolated(unsafe) private var pick: () -> Proxy?
     private var sessions = Set<BridgeSession>()
-    private let wsHosts = ["kws1.web.telegram.org", "kws2.web.telegram.org", "kws3.web.telegram.org"]
-    private var wsIndex = 0
+    private static let wsHosts = ["kws1.web.telegram.org", "kws2.web.telegram.org", "kws3.web.telegram.org"]
+    private static var wsIndex = 0
 
     var tgURL: URL? {
         URL(string: "tg://proxy?server=127.0.0.1&port=\(port)&secret=\(Self.localSecretHex)")
@@ -45,7 +45,7 @@ final class BridgeTunnel: ObservableObject {
         self.pick = pick
     }
 
-    var currentPicker: () -> Proxy? { pick }
+    nonisolated var currentPicker: () -> Proxy? { pick }
 
     func start() {
         guard !isRunning else { return }
@@ -97,7 +97,7 @@ final class BridgeTunnel: ObservableObject {
         sessions.removeAll()
     }
 
-    func nextWSHost() -> String {
+    nonisolated static func nextWSHost() -> String {
         let h = wsHosts[wsIndex % wsHosts.count]
         wsIndex += 1
         return h
@@ -118,7 +118,7 @@ final class BridgeTunnel: ObservableObject {
 
     // MARK: - TLS record wrap/strip (как localproxy._wrap_records/_strip_records)
 
-    static func wrapRecords(_ data: Data) -> Data {
+    nonisolated static func wrapRecords(_ data: Data) -> Data {
         var out = Data()
         var rest = data
         while !rest.isEmpty {
@@ -132,7 +132,7 @@ final class BridgeTunnel: ObservableObject {
         return out
     }
 
-    static func stripRecords(_ buf: Data) -> (payload: Data, rest: Data) {
+    nonisolated static func stripRecords(_ buf: Data) -> (payload: Data, rest: Data) {
         var out = Data()
         var rest = buf
         while rest.count >= 5 {
@@ -239,9 +239,9 @@ final class BridgeSession: Hashable {
         lastActivity = Date()
     }
 
-    private func setTunnel(_ body: (BridgeTunnel) -> Void) {
+    private func setTunnel(_ body: @escaping @MainActor (BridgeTunnel) -> Void) {
         guard let tunnel else { return }
-        DispatchQueue.main.async { body(tunnel) }
+        Task { @MainActor in body(tunnel) }
     }
 
     // MARK: - клиент -> заголовок
@@ -344,13 +344,14 @@ final class BridgeSession: Hashable {
             guard let firstSNI = snis.first else { stop(); return }
             mode = .nativeTLS
             connect(host: proxy.host, port: proxy.port, tls: true, sni: firstSNI) { [weak self] rest in
-                self?.fallbackWrapped(proxy: proxy, snis: Array(rest.isEmpty ? snis.dropFirst() : rest.dropFirst()))
+                self?.fallbackWrapped(proxy: proxy,
+                                      snis: rest.isEmpty ? Array(snis.dropFirst()) : Array(rest.dropFirst()))
             }
         }
     }
 
     private func connect(host: String, port: Int, tls: Bool, sni: String?,
-                         onFail: ((ArraySlice<String>) -> Void)? = nil) {
+                         onFail: (([String]) -> Void)? = nil) {
         guard let portV = NWEndpoint.Port(rawValue: UInt16(port)) else { stop(); return }
         let params: NWParameters
         if tls, let sni {
@@ -399,13 +400,13 @@ final class BridgeSession: Hashable {
     }
 
     // Fallback для ee-серверов, не умеющих полный TLS: ClientHello + TLS-records
-    private func fallbackWrapped(proxy: Proxy, snis: ArraySlice<String>) {
+    private func fallbackWrapped(proxy: Proxy, snis: [String]) {
         guard !snis.isEmpty, !stopped else {
             if snis.isEmpty { stop() }
             return
         }
         let sni = snis.first!
-        let rest = snis.dropFirst()
+        let rest = Array(snis.dropFirst())
         mode = .wrappedRecord
         guard let portV = NWEndpoint.Port(rawValue: UInt16(proxy.port)) else { stop(); return }
         let conn = NWConnection(host: NWEndpoint.Host(proxy.host), port: portV, using: .tcp)
@@ -425,7 +426,7 @@ final class BridgeSession: Hashable {
         conn.start(queue: queue)
     }
 
-    private func sendClientHello(_ conn: NWConnection, sni: String, rest: ArraySlice<String>) {
+    private func sendClientHello(_ conn: NWConnection, sni: String, rest: [String]) {
         touch()
         let hello = tlsClientHello(host: sni)
         conn.send(content: hello, completion: .contentProcessed { [weak self] error in
@@ -438,7 +439,7 @@ final class BridgeSession: Hashable {
         })
     }
 
-    private func retryWrapped(_ conn: NWConnection, sni: String, rest: ArraySlice<String>) {
+    private func retryWrapped(_ conn: NWConnection, sni: String, rest: [String]) {
         conn.cancel()
         if let p = tunnel?.currentPicker(), !p.secret.isEmpty, !rest.isEmpty {
             fallbackWrapped(proxy: p, snis: rest)
@@ -447,7 +448,7 @@ final class BridgeSession: Hashable {
         }
     }
 
-    private func drainClientHelloReply(_ conn: NWConnection, sni: String, rest: ArraySlice<String>, buf: Data) {
+    private func drainClientHelloReply(_ conn: NWConnection, sni: String, rest: [String], buf: Data) {
         guard !stopped else { return }
         conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
             guard let self else { return }
@@ -495,7 +496,7 @@ final class BridgeSession: Hashable {
 
     private func startWS() {
         wsAttempts += 1
-        guard !stopped, wsAttempts <= 6, let host = tunnel?.nextWSHost() else { stop(); return }
+        guard !stopped, wsAttempts <= 6, let host = Self.nextWSHost() else { stop(); return }
         // Новое обф-сессии к kws: обычный MTProto-транспорт (abridged, без секрета),
         // как у прямых подключений к DC. Потоки re-encrypt'ятся отдельно от клиента.
         guard let initK = obfuscatedInit(tag: tagABRIDGED, dcID: 2) else { stop(); return }
@@ -808,7 +809,7 @@ final class BridgeSession: Hashable {
             if op == 0x1 || op == 0x2 {
                 payloads.append(payload)
             }
-            b = b[b.startIndex + skip...]
+            b = b.dropFirst(skip)
         }
         return (payloads, b)
     }
