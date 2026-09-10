@@ -30,8 +30,8 @@ final class BridgeTunnel: ObservableObject {
     private var listener: NWListener?
     nonisolated(unsafe) private var pick: () -> Proxy?
     private var sessions = Set<BridgeSession>()
-    private static let wsHosts = ["kws1.web.telegram.org", "kws2.web.telegram.org", "kws3.web.telegram.org"]
-    private static var wsIndex = 0
+    nonisolated(unsafe) private static let wsHosts = ["kws1.web.telegram.org", "kws2.web.telegram.org", "kws3.web.telegram.org"]
+    nonisolated(unsafe) private static var wsIndex = 0
 
     var tgURL: URL? {
         URL(string: "tg://proxy?server=127.0.0.1&port=\(port)&secret=\(Self.localSecretHex)")
@@ -496,7 +496,7 @@ final class BridgeSession: Hashable {
 
     private func startWS() {
         wsAttempts += 1
-        guard !stopped, wsAttempts <= 6, let host = Self.nextWSHost() else { stop(); return }
+        guard !stopped, wsAttempts <= 6, let host = BridgeTunnel.nextWSHost() else { stop(); return }
         // Новое обф-сессии к kws: обычный MTProto-транспорт (abridged, без секрета),
         // как у прямых подключений к DC. Потоки re-encrypt'ятся отдельно от клиента.
         guard let initK = obfuscatedInit(tag: tagABRIDGED, dcID: 2) else { stop(); return }
@@ -519,7 +519,7 @@ final class BridgeSession: Hashable {
         let conn = NWConnection(to: .hostPort(host: NWEndpoint.Host(host), port: portV),
                                 using: NWParameters(tls: tlsOpts))
         upstream = conn
-        conn.stateUpdateHandler = { [weak self] state in
+        conn.stateUpdateHandler = { [weak self] (state: NWConnection.State) in
             guard let self else { return }
             switch state {
             case .ready:
