@@ -496,7 +496,8 @@ final class BridgeSession: Hashable {
 
     private func startWS() {
         wsAttempts += 1
-        guard !stopped, wsAttempts <= 6, let host = BridgeTunnel.nextWSHost() else { stop(); return }
+        guard !stopped, wsAttempts <= 6 else { stop(); return }
+        let host = BridgeTunnel.nextWSHost()
         // Новое обф-сессии к kws: обычный MTProto-транспорт (abridged, без секрета),
         // как у прямых подключений к DC. Потоки re-encrypt'ятся отдельно от клиента.
         guard let initK = obfuscatedInit(tag: tagABRIDGED, dcID: 2) else { stop(); return }
