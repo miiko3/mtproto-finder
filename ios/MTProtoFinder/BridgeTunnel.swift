@@ -149,7 +149,10 @@ final class BridgeTunnel: ObservableObject {
 }
 
 /// Одна клиентская сессия: клиент (Telegram) <-> реле <-> выбранный сервер/WSS.
-final class BridgeSession {
+final class BridgeSession: Hashable {
+    static func == (lhs: BridgeSession, rhs: BridgeSession) -> Bool { lhs === rhs }
+    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+
     private let client: NWConnection
     private weak var tunnel: BridgeTunnel?
     private let queue: DispatchQueue
