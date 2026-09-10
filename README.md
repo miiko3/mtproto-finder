@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40miiko3-blue)](https://t.me/miiko3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.4-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.5-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -52,7 +52,7 @@ chmod +x MTProto-Finder-x86_64.AppImage
 - 📋 Контекстное меню карточки: подключиться, скопировать ссылку или адрес; на Android — долгий тап
 - ⌨ Менюбар с горячими клавишами: `Ctrl+1/2` — тип прокси, `F5` — обновить, `Ctrl+,` — настройки, `F1` — справка
 - 🧊 Графитовый glass-интерфейс в цвет иконки: безрамочное окно, тёмная тема, синий акцент, blur-стекло
-- 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер; работает и с FakeTLS-прокси (нативный TLS или record-обёртка), на Android то же самое
+- 🔌 **Локальный прокси** — поднимает MTProto-мост на `127.0.0.1:10811` через лучший найденный сервер; работает и с FakeTLS-прокси (нативный TLS, record-обёртка) и с WebSocket-режимом напрямую в Telegram (kws1-3.web.telegram.org:443); на Linux и iOS — один и тот же алгоритм
 - 🚙 Автозапуск при входе в систему (`./install_autostart.sh`)
 - 📴 Сам следит за интернетом: пропала сеть — пересканирует через 15 секунд
 
@@ -98,7 +98,30 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 |---|---|---|
 | Linux (AppImage) | 1.4.3 | ✅ стабильная |
 | Android (APK) | 0.1.3.5b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 1.0.1 | 🧪 бета, сборка unsigned через GitHub Actions |
+| iOS (SwiftUI, Liquid Glass) | 1.0.2 | 🧪 бета, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.5 (iOS 1.0.2)
+
+- 🚇 **Локальный туннель на iOS** — порт Linux-моста `localproxy.py` на Swift:
+  приложение поднимает настоящий MTProto-прокси на `127.0.0.1:10811` с
+  секретом `dd…dd`. В Telegram добавляете
+  `tg://proxy?server=127.0.0.1&port=10811&secret=dd…dd` — и вся связь идёт
+  через лучший проверенный приложением сервер.
+- 🔄 **Три режима реле** для туннеля: обычный MTProto, FakeTLS (полный TLS-туннель
+  по SNI из секрета; реальное рукопожатие `req_pq_multi` → `ResPQ`) и честный
+  fallback с посылкой `ClientHello` + обёрткой в TLS-records — тот же алгоритм,
+  что в Linux-версии.
+- 🌐 **WebSocket-режим**: если рабочих серверов нет, туннель автоматически
+  ходит в Telegram напрямую через `kws1-3.web.telegram.org:443` (WSS,
+  собственный мини-клиент WebSocket на Network.framework) — приложение
+  остаётся полезным даже при блокировках.
+- ✔ **Самопроверка шифра**: при старте AES-CTR / derive / framing / wrap-strip
+  сверяются с эталонными векторами PyCryptodome (тем, что использует
+  локальный мост) — в шапке появляется щит: 🛡 если рукопожатие совместимо
+  с реальными MTProto-прокси.
+- 🎛 **Карточка «Локальный туннель»** в стиле остального стеклянного UI:
+  PowerButton с пульсом, живой бейдж LIVE, строки Адрес/Секрет (тап открывает
+  весь `dd…dd`), кнопки «Ссылка tg://» (копирование) и «В Telegram».
 
 ## Что нового в 1.4.4 (iOS 1.0.1)
 

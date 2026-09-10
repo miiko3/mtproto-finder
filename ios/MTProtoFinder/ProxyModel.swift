@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/miiko3"
-let APP_VERSION = "1.0.1"
+let APP_VERSION = "1.0.2"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -59,10 +59,18 @@ final class ProxyModel: ObservableObject {
     @Published var status = "Готов"
     @Published var mode = "mtproto"
     @Published var isSearching = false
+    @Published var cryptoOK: Bool?
+    let tunnel = BridgeTunnel(pick: { nil })
     private var all: [Proxy] = []
     private var pingTask: Task<Void, Never>?
 
     func start() async {
+        let check = CipherCheck.run()
+        cryptoOK = check.ok
+        if !check.ok {
+            status = "Шифр: сбой — туннель не включится"
+        }
+        tunnel.setPicker { [weak self] in self?.bestBridgeServer() }
         status = "Поиск прокси…"
         isSearching = true
         all = await Self.fetchAll()
@@ -83,6 +91,12 @@ final class ProxyModel: ObservableObject {
 
     func pool() -> [Proxy] {
         all.filter { $0.proto == mode }
+    }
+
+    /// Лучший рабочий MTProto-сервер для реле туннеля (пул не зависит от mode).
+    func bestBridgeServer() -> Proxy? {
+        all.filter { $0.proto == "mtproto" && $0.valid && $0.ping > 0 }
+            .min { $0.ping < $1.ping }
     }
 
     private func pingLoop() async {

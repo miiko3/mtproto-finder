@@ -14,12 +14,12 @@ enum ObfFraming {
     case intermediate
 }
 
-private let reservedInitPrefixes: [[UInt8]] = [
+let reservedInitPrefixes: [[UInt8]] = [
     Array("HEAD".utf8), Array("POST".utf8), Array("GET ".utf8), Array("OPTI".utf8),
     [0xEE, 0xEE, 0xEE, 0xEE], [0xDD, 0xDD, 0xDD, 0xDD], [0x16, 0x03, 0x01, 0x02]
 ]
 
-private func aesECBEncrypt(key: Data, block: [UInt8]) -> [UInt8] {
+func aesECBEncrypt(key: Data, block: [UInt8]) -> [UInt8] {
     guard block.count == 16 else { return [] }
     var out = [UInt8](repeating: 0, count: 16)
     let outCount = out.count
@@ -38,7 +38,7 @@ private func aesECBEncrypt(key: Data, block: [UInt8]) -> [UInt8] {
 
 /// AES-CTR stream compatible with PyCryptodome's `AES.MODE_CTR` (128-bit
 /// big-endian counter starting at `initial_value`, advanced per 16-byte block).
-private final class ObfCipher: @unchecked Sendable {
+final class ObfCipher: @unchecked Sendable {
     private let key: Data
     private let iv: [UInt8]
     private var counter: UInt64
@@ -97,7 +97,7 @@ private final class DeepProbeFinisher: @unchecked Sendable {
     }
 }
 
-private func obfuscatedInit(tag: [UInt8], dcID: UInt16) -> [UInt8]? {
+func obfuscatedInit(tag: [UInt8], dcID: UInt16) -> [UInt8]? {
     for _ in 0..<128 {
         var r = (0..<64).map { _ in UInt8.random(in: 0...255) }
         if r[0] == 0xEF { continue }
@@ -113,7 +113,7 @@ private func obfuscatedInit(tag: [UInt8], dcID: UInt16) -> [UInt8]? {
     return nil
 }
 
-private func decodeHex(_ s: String) -> [UInt8]? {
+func decodeHex(_ s: String) -> [UInt8]? {
     var out = [UInt8]()
     var i = s.startIndex
     while i < s.index(before: s.endIndex) {
@@ -125,9 +125,19 @@ private func decodeHex(_ s: String) -> [UInt8]? {
     return out
 }
 
+func deriveKeys(region: [UInt8], secret: Data) -> (fk: Data, fkIV: [UInt8], rk: Data, rkIV: [UInt8]) {
+    let regionArr = Array(region)
+    let rev = Array(regionArr.reversed())
+    let fk = Data(SHA256.hash(data: Data(regionArr[0..<32]) + secret))
+    let fkIV = [UInt8](region[32..<48])
+    let rk = Data(SHA256.hash(data: Data(rev[0..<32]) + secret))
+    let rkIV = [UInt8](rev[32..<48])
+    return (fk, fkIV, rk, rkIV)
+}
+
 /// Same as localproxy.py `_secret_bytes`: FakeTLS secrets start with a 0xEE
 /// marker byte, so the crypto key is the 16 bytes *after* it.
-private func mtprotoSecretBytes(_ secret: String) -> Data? {
+func mtprotoSecretBytes(_ secret: String) -> Data? {
     var h = secret.lowercased()
     if h.hasPrefix("dd"), h.count == 34 { h = String(h.dropFirst(2)) }
     guard h.count % 2 == 0, h.count >= 2, var bytes = decodeHex(h) else { return nil }
@@ -138,7 +148,7 @@ private func mtprotoSecretBytes(_ secret: String) -> Data? {
     return Data(bytes.prefix(16))
 }
 
-private func consumeFrame(_ data: Data, framing: ObfFraming) -> (used: Int, offset: Int)? {
+func consumeFrame(_ data: Data, framing: ObfFraming) -> (used: Int, offset: Int)? {
     let b = [UInt8](data)
     switch framing {
     case .abridged:

@@ -10,9 +10,10 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             LiquidBackground()
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 header
                 ModeSwitch(mode: $model.mode)
+                TunnelCard(tunnel: model.tunnel)
                 proxyList
                 StatusChip(text: model.status, busy: model.isSearching)
                 if let sel = model.top.first {
@@ -45,12 +46,21 @@ struct ContentView: View {
                     )
                     .clipShape(Circle())
                     .overlay(Circle().strokeBorder(AppPalette.accent.opacity(0.55), lineWidth: 1.5))
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("MTProto Finder").font(.system(size: 18, weight: .heavy))
                         .foregroundColor(.primary)
-                    Text(APP_VERSION)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 5) {
+                        Text(APP_VERSION)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                        if let ok = model.cryptoOK {
+                            Image(systemName: ok ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(ok ? AppPalette.good : AppPalette.bad)
+                        } else {
+                            ProgressView().controlSize(.mini).tint(.secondary)
+                        }
+                    }
                 }
             }
             .padding(.leading, 10)
@@ -81,7 +91,7 @@ struct ContentView: View {
                     systemImage: "antenna.radiowaves.left.and.right",
                     description: Text("Получение списков и проверка пинга")
                 )
-                .frame(minHeight: 300)
+                .frame(minHeight: 260)
             } else {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(model.top) { proxy in

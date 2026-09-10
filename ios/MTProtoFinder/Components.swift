@@ -316,3 +316,196 @@ struct DockBar: View {
         .padding(.horizontal, 4)
     }
 }
+
+// MARK: - LiveBadge (пульсирующий статус, как в референсе)
+
+struct LiveBadge: View {
+    let isLive: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isLive ? AppPalette.good : Color.secondary.opacity(0.5))
+                .frame(width: 7, height: 7)
+                .scaleEffect(pulse ? 1.4 : 0.85)
+                .opacity(pulse ? 0.55 : 1)
+            Text(isLive ? "LIVE" : "OFF")
+                .font(.caption2.weight(.heavy))
+                .kerning(0.6)
+                .foregroundColor(isLive ? AppPalette.good : Color.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(isLive ? AppPalette.good.opacity(0.14) : Color.primary.opacity(0.05)))
+        .overlay(Capsule().strokeBorder(isLive ? AppPalette.good.opacity(0.4) : Color.primary.opacity(0.08),
+                                        lineWidth: 0.5))
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+// MARK: - PowerButton (с пульсирующим ореолом вкл/выкл)
+
+struct PowerButton: View {
+    let isOn: Bool
+    var size: CGFloat = 58
+    var action: () -> Void
+
+    @State private var boost = false
+
+    var body: some View {
+        Button {
+            boost = true
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.55)) { boost = false }
+            action()
+        } label: {
+            ZStack {
+                if isOn {
+                    Circle()
+                        .fill(AppPalette.good.opacity(0.35))
+                        .frame(width: size * 0.75, height: size * 0.75)
+                        .blur(radius: 8)
+                        .scaleEffect(boost ? 1.8 : 1)
+                        .animation(.easeOut(duration: 0.5), value: boost)
+                }
+                Circle()
+                    .fill(isOn
+                          ? AnyShapeStyle(LinearGradient(colors: [AppPalette.good, AppPalette.accent],
+                                                          startPoint: .top, endPoint: .bottom))
+                          : AnyShapeStyle(LinearGradient(colors: [AppPalette.baseMid, AppPalette.graphite],
+                                                          startPoint: .top, endPoint: .bottom)))
+                    .overlay(Circle().strokeBorder(isOn ? Color.white.opacity(0.3) : Color.primary.opacity(0.08),
+                                                   lineWidth: 1))
+                    .shadow(color: isOn ? AppPalette.good.opacity(0.55) : Color.clear,
+                            radius: isOn ? 16 : 0, y: 2)
+                    .shadow(color: Color.black.opacity(0.35), radius: 6, y: 3)
+                Image(systemName: "power")
+                    .font(.system(size: size * 0.30, weight: .bold))
+                    .foregroundColor(isOn ? .white : AppPalette.graphiteFaint)
+            }
+            .frame(width: size, height: size)
+        }
+        .buttonStyle(SqueezeButtonStyle(scale: 0.9))
+    }
+}
+
+// MARK: - InfoRow (строка настроек, как card() в референсе)
+
+struct InfoRow: View {
+    var icon: String
+    var title: String
+    var value: String
+    var mono = false
+    var accent = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(AppPalette.graphiteFaint)
+                .frame(width: 22)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary)
+            Spacer()
+            Text(value)
+                .font(mono
+                      ? .system(size: 12, weight: .semibold).monospaced()
+                      : .system(size: 12, weight: .semibold))
+                .foregroundColor(accent ? AppPalette.accent : AppPalette.graphiteFaint.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .padding(.vertical, 9)
+        .overlay(Divider().opacity(0.35), alignment: .bottom)
+    }
+}
+
+// MARK: - Карточка «Локальный туннель»
+
+struct TunnelCard: View {
+    @ObservedObject var tunnel: BridgeTunnel
+    @Environment(\.openURL) private var openURL
+    @State private var copied = false
+    @State private var revealSecret = false
+
+    private var fullSecret: String { BridgeTunnel.localSecretHex }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                PowerButton(isOn: tunnel.isRunning) {
+                    if tunnel.isRunning { tunnel.stop() } else { tunnel.start() }
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Локальный туннель")
+                        .font(.system(size: 15, weight: .heavy))
+                        .foregroundColor(.primary)
+                    LiveBadge(isLive: tunnel.isRunning)
+                    Text(tunnel.detail)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+
+            VStack(spacing: 0) {
+                InfoRow(icon: "location.fill", title: "Адрес",
+                        value: "127.0.0.1:\(tunnel.port)", mono: true)
+                Button {
+                    revealSecret.toggle()
+                } label: {
+                    InfoRow(icon: "key.fill", title: "Секрет",
+                            value: revealSecret ? fullSecret : "dd…dd",
+                            mono: true, accent: revealSecret)
+                }
+                .buttonStyle(SqueezeButtonStyle(scale: 0.99))
+                if tunnel.wsFallbackActive {
+                    InfoRow(icon: "globe", title: "Транспорт",
+                            value: "WebSocket · kws Telegram DC", accent: true)
+                } else if !tunnel.isRunning {
+                    InfoRow(icon: "bolt.badge.clock", title: "Реле",
+                            value: "лучший MTProto / FakeTLS")
+                }
+            }
+            .padding(.horizontal, 14)
+
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = tunnel.tgURL?.absoluteString ?? ""
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "Скопировано" : "Ссылка tg://",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(AccentButtonStyle())
+
+                Button {
+                    if let url = tunnel.tgURL { openURL(url) }
+                } label: {
+                    Label("В Telegram", systemImage: "paperplane.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(tunnel.isRunning ? AppPalette.accent : .primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(GlassButtonStyle())
+            }
+            .padding(12)
+        }
+        .modifier(GlassCard(cornerRadius: 30))
+        .padding(.horizontal, 4)
+    }
+}
