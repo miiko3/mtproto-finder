@@ -196,7 +196,7 @@ private func parseResPQ(_ data: Data, framing: ObfFraming, nonce: Data) -> Bool?
 /// Full MTProto round-trip ping: obfuscated2 handshake + req_pq_multi == ResPQ.
 /// Returns (elapsed ms, validated). -2.0/"dead" on failure, positive ms + true
 /// only when the proxy really answered with the correct ResPQ.
-func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 2.5) async -> (Double, Bool) {
+func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 4.0) async -> (Double, Bool) {
     await withCheckedContinuation { cont in
         guard let portV = NWEndpoint.Port(rawValue: UInt16(port)) else {
             cont.resume(returning: (-2.0, false)); return
@@ -352,7 +352,7 @@ enum FakeTLSProbeResult {
 /// the SNI embedded in the secret, then performs the full obfuscated2 MTProto
 /// handshake (obf2 header + req_pq_multi) and validates the ResPQ nonce.
 /// A plain TLS handshake is NOT enough to certify a FakeTLS proxy.
-func fakeTLSPing(host: String, port: Int, secret: String, sni: String, timeout: Double = 4.0) async -> FakeTLSProbeResult {
+func fakeTLSPing(host: String, port: Int, secret: String, sni: String, timeout: Double = 5.0) async -> FakeTLSProbeResult {
     await withCheckedContinuation { cont in
         guard let portV = NWEndpoint.Port(rawValue: UInt16(port)),
               let secretData = mtprotoSecretBytes(secret),

@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "1.0.4"
+let APP_VERSION = "1.0.5"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -110,11 +110,13 @@ final class ProxyModel: ObservableObject {
             let pl = pool()
             let untested = pl.filter { $0.ping == -1 }
             let alive = pl.filter { $0.valid && $0.ping > 0 }
+            let reach = pl.filter { $0.isReachOnly }
+            let dead = pl.filter { !$0.valid && !$0.reachable && $0.ping == -2 }
             let targets: [Proxy]
-            if alive.count >= 10 || untested.isEmpty {
-                targets = Array((alive + pl.filter { $0.ping != -1 }).prefix(MAX_SERVERS))
+            if !untested.isEmpty {
+                targets = Array(untested.prefix(24))
             } else {
-                targets = Array(untested.prefix(48))
+                targets = Array((alive + reach + dead.shuffled().prefix(6)).prefix(MAX_SERVERS))
             }
             await MainActor.run { self.isSearching = !untested.isEmpty }
             await withTaskGroup(of: Void.self) { group in
@@ -144,7 +146,7 @@ final class ProxyModel: ObservableObject {
                 }
             }
             refresh()
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
         }
     }
 
@@ -340,7 +342,7 @@ final class ProxyModel: ObservableObject {
                 var fds = fd_set()
                 withUnsafeMutablePointer(to: &fds) { $0.pointee.fds_bits.0 = 0 }
                 fds.fds_bits.0 = Int32(1 << (sock % 32))
-                var tv = timeval(tv_sec: 2, tv_usec: 0)
+                var tv = timeval(tv_sec: 3, tv_usec: 0)
                 let sel = select(sock + 1, nil, &fds, nil, &tv)
                 close(sock)
                 cont.resume(returning: sel > 0 ? Date().timeIntervalSince(start) * 1000 : -2)
@@ -350,7 +352,7 @@ final class ProxyModel: ObservableObject {
 
     /// Real SOCKS5 probe: greeting (05 01 00) + CONNECT to the proxy's own
     /// endpoint. Valid only when the server replies 05 00 to both.
-    static func socksProbe(host: String, port: Int, timeout: Double = 5.0) async -> (Double, Bool) {
+    static func socksProbe(host: String, port: Int, timeout: Double = 6.0) async -> (Double, Bool) {
         await withCheckedContinuation { cont in
             guard let portV = NWEndpoint.Port(rawValue: UInt16(port)), portV.rawValue <= 65535 else {
                 cont.resume(returning: (-2.0, false)); return

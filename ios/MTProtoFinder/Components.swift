@@ -159,10 +159,17 @@ struct PingBadge: View {
                 .fill(indicatorColor)
                 .frame(width: 7, height: 7)
                 .shadow(color: indicatorColor, radius: 3)
-            Text(proxy.pingText)
-                .font(.caption.weight(.heavy))
-                .monospacedDigit()
-                .foregroundColor(indicatorColor)
+            if proxy.ping == -1 && !proxy.valid && !proxy.reachable {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(indicatorColor)
+                    .scaleEffect(0.8)
+            } else {
+                Text(proxy.pingText)
+                    .font(.caption.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundColor(indicatorColor)
+            }
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
@@ -223,12 +230,13 @@ struct SegmentGlowStyle: ButtonStyle {
     let on: Bool
     let accentColor: Color
 
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
         let shape = Capsule()
-        configuration.label
-            .foregroundColor(on ? .white : AppPalette.graphiteFaint)
-            .background {
-                if on {
+        if on {
+            configuration.label
+                .foregroundColor(.white)
+                .background {
                     shape
                         .fill(LinearGradient(colors: [accentColor, accentColor.opacity(0.72)],
                                              startPoint: .top, endPoint: .bottom))
@@ -237,18 +245,23 @@ struct SegmentGlowStyle: ButtonStyle {
                                                       startPoint: .top, endPoint: .center))
                         )
                         .overlay(shape.strokeBorder(Color.white.opacity(0.26), lineWidth: 0.5))
-                        .shadow(color: accentColor.opacity(0.45), radius: 14, y: 3)
-                } else {
-                    shape
-                        .fill(AppPalette.baseMid.opacity(0.85))
-                        .overlay(shape.strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
-                        .background(shape.fill(.ultraThinMaterial))
-                        .shadow(color: Color.black.opacity(0.25), radius: 6, y: 2)
+                        .shadow(color: accentColor.opacity(0.4), radius: 14, y: 3)
                 }
-            }
-            .scaleEffect(configuration.isPressed ? 0.93 : 1)
-            .brightness(configuration.isPressed ? -0.05 : (on ? 0.02 : 0))
-            .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
+                .scaleEffect(configuration.isPressed ? 0.93 : 1)
+                .brightness(configuration.isPressed ? -0.05 : 0.02)
+                .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
+        } else {
+            configuration.label
+                .foregroundColor(AppPalette.graphiteFaint)
+                .background {
+                    shape.fill(AppPalette.baseMid.opacity(0.45))
+                        .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                }
+                .glassEffect(.regular, in: .capsule)
+                .scaleEffect(configuration.isPressed ? 0.93 : 1)
+                .brightness(configuration.isPressed ? -0.06 : 0)
+                .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
+        }
     }
 }
 
@@ -257,7 +270,7 @@ struct SegmentButton: View {
     let icon: String
     let label: String
     var accentColor: Color = AppPalette.accent
-    var width: CGFloat = 138
+    var width: CGFloat? = nil
     var height: CGFloat = 46
     var action: () -> Void
 
@@ -269,8 +282,9 @@ struct SegmentButton: View {
                 Text(label)
                     .font(.system(size: 13, weight: .heavy))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
             }
+            .frame(maxWidth: width == nil ? .infinity : nil)
             .frame(width: width, height: height)
         }
         .buttonStyle(SegmentGlowStyle(on: isOn, accentColor: accentColor))
@@ -287,16 +301,12 @@ struct GlassTabBar: View {
             ForEach(MainTab.allCases) { tab in
                 SegmentButton(isOn: selection == tab,
                               icon: tab.icon,
-                              label: tab.label,
-                              width: 148) {
+                              label: tab.label) {
                     withAnimation(.snappy(duration: 0.28)) { selection = tab }
                 }
             }
         }
-        .padding(6)
-        .modifier(GlassCard(cornerRadius: 28))
-        .frame(maxWidth: 330)
-        .padding(.horizontal, 4)
+        .frame(maxWidth: 340)
     }
 }
 
@@ -316,7 +326,7 @@ struct ModeSwitch: View {
                 withAnimation(.snappy(duration: 0.28)) { mode = "socks5" }
             }
         }
-        .padding(.horizontal, 2)
+        .frame(maxWidth: 340)
     }
 }
 

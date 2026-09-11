@@ -25,25 +25,55 @@ enum MainTab: String, CaseIterable, Identifiable, Hashable {
 struct ContentView: View {
     @StateObject private var model = ProxyModel()
     @State private var tab = MainTab.proxies
+    @State private var copied = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ZStack {
             LiquidBackground()
-            Group {
-                switch tab {
-                case .proxies: ProxiesTab(model: model)
-                case .local: LocalProxyTab(model: model)
-                }
+            switch tab {
+            case .proxies: ProxiesTab(model: model)
+            case .local: LocalProxyTab(model: model)
             }
-            .safeAreaInset(edge: .bottom, spacing: 6) {
-                GlassTabBar(selection: $tab)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
-            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomBar
         }
         .preferredColorScheme(.dark)
         .task { await model.start() }
+    }
+
+    private var bottomBar: some View {
+        VStack(spacing: 10) {
+            if tab == .proxies, let sel = model.top.first {
+                DockBar(proxy: sel, copied: copied) { copyLink(sel) }
+                    .frame(maxWidth: 680)
+            }
+            GlassTabBar(selection: $tab)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+    }
+
+    private func copyLink(_ proxy: Proxy) {
+        UIPasteboard.general.string = proxy.tgURL?.absoluteString ?? ""
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+    }
+}
+
+// MARK: - Адаптивная раскладка (общая для вкладок)
+
+private enum Layout {
+    static func columns(_ width: CGFloat) -> Int {
+        if width < 240 { return 1 }
+        if width < 620 { return 2 }
+        return 3
+    }
+
+    static func insets(_ width: CGFloat) -> CGFloat {
+        width >= 700 ? 26 : 14
     }
 }
 
@@ -52,9 +82,6 @@ struct ContentView: View {
 struct ProxiesTab: View {
     @ObservedObject var model: ProxyModel
     @Environment(\.openURL) private var openURL
-    @State private var copied = false
-
-    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 300), spacing: 12)]
 
     var body: some View {
         GeometryReader { geo in
@@ -62,28 +89,19 @@ struct ProxiesTab: View {
                 VStack(spacing: 13) {
                     AppHeader(cryptoOK: model.cryptoOK)
                     ModeSwitch(mode: $model.mode)
-                    proxyList
+                    proxyList(columns: Layout.columns(geo.size.width))
                     StatusChip(text: model.status, busy: model.isSearching)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, Layout.insets(geo.size.width))
                 .padding(.top, 8)
-                .padding(.bottom, 12)
-                .frame(maxWidth: 660)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 680)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let sel = model.top.first {
-                    DockBar(proxy: sel, copied: copied) {
-                        copyLink(sel)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
             }
         }
     }
 
-    private var proxyList: some View {
+    private func proxyList(columns: Int) -> some View {
         Group {
             if model.top.isEmpty {
                 ContentUnavailableView(
@@ -93,22 +111,16 @@ struct ProxiesTab: View {
                 )
                 .frame(minHeight: 240)
             } else {
-                LazyVGrid(columns: columns, spacing: 12) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12),
+                                         count: max(1, columns)), spacing: 12) {
                     ForEach(model.top) { proxy in
                         ProxyCard(proxy: proxy) {
                             if let url = proxy.tgURL { openURL(url) }
                         }
                     }
                 }
-                .padding(.horizontal, 2)
             }
         }
-    }
-
-    private func copyLink(_ proxy: Proxy) {
-        UIPasteboard.general.string = proxy.tgURL?.absoluteString ?? ""
-        copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
     }
 }
 
@@ -128,10 +140,10 @@ struct LocalProxyTab: View {
                     GuideCard(tunnel: model.tunnel)
                     tunnelStatus(tunnel: model.tunnel)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, Layout.insets(geo.size.width))
                 .padding(.top, 8)
-                .padding(.bottom, 16)
-                .frame(maxWidth: 660)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 680)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
         }
@@ -149,6 +161,6 @@ struct LocalProxyTab: View {
         }
         .padding(.horizontal, 14)
         .modifier(GlassCard(cornerRadius: 26))
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 2)
     }
 }
