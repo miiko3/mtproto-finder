@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/miiko3"
-let APP_VERSION = "1.0.2"
+let APP_VERSION = "1.0.3"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -372,12 +372,13 @@ final class ProxyModel: ObservableObject {
                             guard let d = data, error == nil, d.count >= 2, d[0] == 0x05, d[1] == 0x00 else {
                                 done(-2.0, false); return
                             }
+                            let greetMS = Date().timeIntervalSince(start) * 1000
                             conn.send(content: req, completion: .contentProcessed { _ in
                                 conn.receive(minimumIncompleteLength: 2, maximumLength: 4096) { data2, _, _, err2 in
                                     guard let d2 = data2, err2 == nil, d2.count >= 2, d2[0] == 0x05, d2[1] == 0x00 else {
                                         done(-2.0, false); return
                                     }
-                                    done(Date().timeIntervalSince(start) * 1000, true)
+                                    done(greetMS, true)
                                 }
                             })
                         }

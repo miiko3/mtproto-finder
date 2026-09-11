@@ -29,12 +29,21 @@ extension View {
 struct GlassCard: ViewModifier {
     var cornerRadius: CGFloat = 28
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                shape.fill(
+                    LinearGradient(colors: [
+                        Color.white.opacity(0.22),
+                        Color.white.opacity(0.03),
+                        Color.clear
+                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .blendMode(.plusLighter)
+                .allowsHitTesting(false)
             )
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
     }
 }
 
@@ -70,15 +79,25 @@ struct GlassButton: ViewModifier {
 
 struct AccentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
+        let shape = Capsule()
         configuration.label
-            .background(
-                Capsule().fill(
-                    LinearGradient(colors: [AppPalette.accent, AppPalette.accent.opacity(0.80)],
-                                   startPoint: .top, endPoint: .bottom)
-                )
-            )
-            .shadow(color: AppPalette.accent.opacity(configuration.isPressed ? 0.12 : 0.45),
-                    radius: configuration.isPressed ? 4 : 14, y: configuration.isPressed ? 1 : 4)
+            .background {
+                shape
+                    .fill(
+                        LinearGradient(colors: [AppPalette.accent, AppPalette.accent.opacity(0.70)],
+                                       startPoint: .top, endPoint: .bottom)
+                    )
+                    .opacity(configuration.isPressed ? 0.70 : 0.85)
+                    .overlay(
+                        shape.fill(
+                            LinearGradient(colors: [Color.white.opacity(0.32), Color.clear],
+                                           startPoint: .top, endPoint: .center)
+                        )
+                    )
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.24), lineWidth: 0.5))
+                    .shadow(color: AppPalette.accent.opacity(configuration.isPressed ? 0.12 : 0.45),
+                            radius: configuration.isPressed ? 4 : 14, y: configuration.isPressed ? 1 : 4)
+            }
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
     }
@@ -220,7 +239,13 @@ struct ModeSwitch: View {
                     .foregroundColor(mode == item.key ? .white : AppPalette.graphiteFaint)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
-                    .background(mode == item.key ? Capsule().fill(AppPalette.accent) : nil)
+                    .background {
+                        if mode == item.key {
+                            Capsule()
+                                .fill(AppPalette.accent.opacity(0.42))
+                                .overlay(Capsule().strokeBorder(AppPalette.accent.opacity(0.55), lineWidth: 0.5))
+                        }
+                    }
                 }
                 .buttonStyle(SqueezeButtonStyle(scale: 0.94))
                 .if(mode != item.key) { view in
@@ -422,6 +447,140 @@ struct InfoRow: View {
         }
         .padding(.vertical, 9)
         .overlay(Divider().opacity(0.35), alignment: .bottom)
+    }
+}
+
+// MARK: - AppHeader (лого + название + версия + бейдж шифра)
+
+struct AppHeader: View {
+    var cryptoOK: Bool?
+    var title = "MTProto Finder"
+    var showAuthor = true
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image("AppLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 46, height: 46)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(AppPalette.accent.opacity(0.45), lineWidth: 1.5))
+                .shadow(color: AppPalette.accent.opacity(0.35), radius: 8)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 17, weight: .heavy))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                HStack(spacing: 6) {
+                    Text(APP_VERSION)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                    if let ok = cryptoOK {
+                        Label(ok ? "шифр OK" : "шифр: сбой",
+                              systemImage: ok ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(ok ? AppPalette.good : AppPalette.bad)
+                            .labelStyle(.titleAndIcon)
+                    } else {
+                        ProgressView().controlSize(.mini).tint(.secondary)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if showAuthor {
+                Link(destination: URL(string: AUTHOR_URL)!) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 46, height: 46)
+                        .modifier(GlassCard(cornerRadius: 23))
+                }
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 14)
+        .padding(.vertical, 10)
+        .modifier(GlassCard(cornerRadius: 30))
+        .padding(.horizontal, 4)
+    }
+}
+
+// MARK: - GuideCard (инструкция для локального прокси)
+
+struct GuideCard: View {
+    @ObservedObject var tunnel: BridgeTunnel
+    @State private var copied = false
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(AppPalette.accent)
+                Text("Как подключить в Telegram")
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundColor(.primary)
+            }
+            step(1, "Включи «Локальный прокси» кнопкой питания выше.")
+            step(2, "Используй ссылку tg:// или добавь вручную: 127.0.0.1, порт \(tunnel.port), секрет dd…dd.")
+            step(3, "Telegram → Настройки → Данные и память → Прокси → добавить MTProto.")
+            step(4, tunnel.wsFallbackActive
+                 ? "Сейчас реле — WebSocket (kws): серверы недоступны, трафик идёт напрямую."
+                 : "Серверы проверяются автоматически: туннель релеит через лучший MTProto / FakeTLS.")
+
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = tunnel.tgURL?.absoluteString ?? ""
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "Скопировано" : "Ссылка tg://",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(GlassButtonStyle())
+
+                Button {
+                    if let url = tunnel.tgURL { openURL(url) }
+                } label: {
+                    Label("В Telegram", systemImage: "paperplane.fill")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(AccentButtonStyle())
+            }
+        }
+        .padding(16)
+        .modifier(GlassCard(cornerRadius: 28))
+        .padding(.horizontal, 4)
+    }
+
+    private func step(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(AppPalette.accent.opacity(0.30))
+                Text("\(n)")
+                    .font(.system(size: 11, weight: .heavy))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 22, height: 22)
+            Text(text)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

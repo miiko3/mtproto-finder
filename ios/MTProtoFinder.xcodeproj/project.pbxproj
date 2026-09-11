@@ -41,7 +41,7 @@
 		1A000020 /* MTProtoFinder */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A000040;
-			buildPhases = (1A000030);
+			buildPhases = (1A000030, 1A000039);
 			buildRules = ();
 			dependencies = ();
 			name = MTProtoFinder;
@@ -68,6 +68,17 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXResourcesBuildPhase section */
+		1A000039 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A000038 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXBuildFile section */
 		1A000031 /* MTProtoFinderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001; };
 		1A000032 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000002; };
@@ -76,6 +87,7 @@
 		1A000035 /* MTProtoPing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000008; };
  		1A000036 /* BridgeTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000009; };
  		1A000037 /* CryptoVectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000A; };
+		1A000038 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A000004; };
 /* End PBXBuildFile section */
 
 /* Begin PBXProject section */
@@ -101,7 +113,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -120,7 +132,7 @@
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleDark;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.miiko3.mtprotofinder;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

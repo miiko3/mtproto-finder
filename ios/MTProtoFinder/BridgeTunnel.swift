@@ -57,6 +57,8 @@ final class BridgeTunnel: ObservableObject {
                 detail = "Некорректный порт \(portValue)"
                 return
             }
+            params.requiredLocalEndpoint = NWEndpoint.hostPort(host: NWEndpoint.Host("127.0.0.1"),
+                                                                 port: portNW)
             let nw = try NWListener(using: params, on: portNW)
             listener = nw
             nw.newConnectionHandler = { [weak self] conn in
@@ -635,6 +637,7 @@ final class BridgeSession: Hashable {
         guard !stopped, !bufFromClient.isEmpty, let up = upstream else { return }
         var plain = recvC.update(bufFromClient)
         bufFromClient = Data()
+        plain = encU.update(plain)
         if mode == .wrappedRecord {
             plain = BridgeTunnel.wrapRecords(plain)
         }
