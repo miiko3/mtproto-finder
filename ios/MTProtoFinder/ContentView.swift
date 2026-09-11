@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-enum MainTab: String, CaseIterable, Identifiable {
+enum MainTab: String, CaseIterable, Identifiable, Hashable {
     case proxies
     case local
 
@@ -20,13 +20,6 @@ enum MainTab: String, CaseIterable, Identifiable {
         case .local: return "bolt.horizontal.circle"
         }
     }
-
-    var iconActive: String {
-        switch self {
-        case .proxies: return "antenna.radiowaves.left.and.right.fill"
-        case .local: return "bolt.horizontal.circle.fill"
-        }
-    }
 }
 
 struct ContentView: View {
@@ -36,15 +29,18 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             LiquidBackground()
-            TabView(selection: $tab) {
-                ProxiesTab(model: model)
-                    .tabItem { Label(MainTab.proxies.label, systemImage: MainTab.proxies.icon) }
-                    .tag(MainTab.proxies)
-                LocalProxyTab(model: model)
-                    .tabItem { Label(MainTab.local.label, systemImage: MainTab.local.icon) }
-                    .tag(MainTab.local)
+            Group {
+                switch tab {
+                case .proxies: ProxiesTab(model: model)
+                case .local: LocalProxyTab(model: model)
+                }
             }
-            .tint(AppPalette.accent)
+            .safeAreaInset(edge: .bottom, spacing: 6) {
+                GlassTabBar(selection: $tab)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+            }
         }
         .preferredColorScheme(.dark)
         .task { await model.start() }
@@ -58,19 +54,21 @@ struct ProxiesTab: View {
     @Environment(\.openURL) private var openURL
     @State private var copied = false
 
+    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 300), spacing: 12)]
+
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: 13) {
                     AppHeader(cryptoOK: model.cryptoOK)
                     ModeSwitch(mode: $model.mode)
-                    proxyList(columns: gridColumns(geo.size.width))
+                    proxyList
                     StatusChip(text: model.status, busy: model.isSearching)
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
-                .frame(maxWidth: 720)
+                .frame(maxWidth: 660)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -85,13 +83,7 @@ struct ProxiesTab: View {
         }
     }
 
-    private func gridColumns(_ width: CGFloat) -> Int {
-        if width >= 760 { return 3 }
-        if width >= 400 { return 2 }
-        return 1
-    }
-
-    private func proxyList(columns: Int) -> some View {
+    private var proxyList: some View {
         Group {
             if model.top.isEmpty {
                 ContentUnavailableView(
@@ -101,8 +93,7 @@ struct ProxiesTab: View {
                 )
                 .frame(minHeight: 240)
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
-                                         count: max(1, columns)), spacing: 10) {
+                LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(model.top) { proxy in
                         ProxyCard(proxy: proxy) {
                             if let url = proxy.tgURL { openURL(url) }
@@ -140,7 +131,7 @@ struct LocalProxyTab: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
-                .frame(maxWidth: 720)
+                .frame(maxWidth: 660)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
         }
@@ -149,8 +140,12 @@ struct LocalProxyTab: View {
     private func tunnelStatus(tunnel: BridgeTunnel) -> some View {
         VStack(spacing: 0) {
             InfoRow(icon: "arrow.triangle.2.circlepath", title: "Реле",
-                    value: tunnel.wsFallbackActive ? "WebSocket · kws" : tunnel.detail,
-                    mono: false, accent: tunnel.isRunning)
+                    value: tunnel.wsFallbackActive
+                        ? "WebSocket · kws Telegram DC"
+                        : (tunnel.isRunning && !tunnel.relayEndpoint.isEmpty
+                            ? tunnel.relayEndpoint
+                            : (tunnel.isRunning ? "выбор лучшего сервера…" : tunnel.detail)),
+                    mono: true, accent: tunnel.isRunning || tunnel.wsFallbackActive)
         }
         .padding(.horizontal, 14)
         .modifier(GlassCard(cornerRadius: 26))

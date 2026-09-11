@@ -26,6 +26,39 @@ final class BridgeTunnel: ObservableObject {
     @Published var detail = "Локальный туннель выключен"
     @Published var port: UInt16 = 10811
     @Published var wsFallbackActive = false
+    @Published var relayPing: Double = -1      // -1 проверка, -2 нет ответа, >0 мс
+    @Published var relayEndpoint = ""
+
+    private var relayPinger: Task<Void, Never>?
+
+    var relayPingText: String {
+        if wsFallbackActive { return "WebSocket · kws" }
+        if relayPing > 0 { return String(format: "%.0f ms", relayPing) }
+        if relayPing == -2 { return "нет ответа" }
+        return "проверка…"
+    }
+
+    /// Вызывается при выборе сервера-реле для каждой новой клиентской сессии.
+    func noteBridge(_ proxy: Proxy) {
+        relayEndpoint = proxy.endpoint
+        relayPing = -1
+        startRelayPinger(proxy)
+    }
+
+    private func startRelayPinger(_ proxy: Proxy) {
+        relayPinger?.cancel()
+        relayPinger = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                if self.isRunning {
+                    let r = await ProxyModel.probe(proxy)
+                    if Task.isCancelled { break }
+                    self.relayPing = r.1 ? r.0 : -2
+                }
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+            }
+        }
+    }
 
     private var listener: NWListener?
     nonisolated(unsafe) private var pick: () -> Proxy?
@@ -49,6 +82,9 @@ final class BridgeTunnel: ObservableObject {
 
     func start() {
         guard !isRunning else { return }
+        if let proxy = currentPicker(), proxy.proto == "mtproto" {
+            noteBridge(proxy)
+        }
         let portValue = port
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
@@ -90,6 +126,9 @@ final class BridgeTunnel: ObservableObject {
     }
 
     func stop() {
+        relayPinger?.cancel()
+        relayPinger = nil
+        relayPing = -1
         listener?.cancel()
         listener = nil
         isRunning = false
@@ -301,6 +340,7 @@ final class BridgeSession: Hashable {
         }
         setTunnel { t in
             t.wsFallbackActive = false
+            t.noteBridge(proxy)
             let kind = proxy.secret.lowercased().hasPrefix("ee") ? "FakeTLS" : "MTProto"
             t.detail = "Туннель через \(proxy.endpoint) · \(kind)"
         }
@@ -311,6 +351,10 @@ final class BridgeSession: Hashable {
     private func fallbackToWS() {
         setTunnel { t in
             t.wsFallbackActive = true
+            t.relayPinger?.cancel()
+            t.relayPinger = nil
+            t.relayPing = -2
+            t.relayEndpoint = "kws.web.telegram.org:443"
             t.detail = "Рабочих серверов нет — WebSocket-режим (Telegram DC)"
         }
         startWS()

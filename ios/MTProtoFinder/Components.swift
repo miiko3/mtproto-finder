@@ -4,14 +4,15 @@ import UIKit
 // MARK: - Palette (графит из AppIcon Frame 30.png) + акцент
 
 enum AppPalette {
-    static let baseDeep      = Color(red: 0.08, green: 0.08, blue: 0.09)   // #151517
-    static let baseMid       = Color(red: 0.12, green: 0.12, blue: 0.13)   // #1F1F21
+    static let baseMid       = Color(red: 0.16, green: 0.16, blue: 0.17)   // #29292C
+    static let baseDeep      = Color(red: 0.12, green: 0.12, blue: 0.13)   // #1F1F21
     static let graphite      = Color(red: 0.36, green: 0.36, blue: 0.36)   // #5C5C5C (avg иконки)
     static let graphiteSoft  = Color(red: 0.44, green: 0.44, blue: 0.44)   // #707070
-    static let graphiteLight = Color(red: 0.55, green: 0.55, blue: 0.55)   // #8C8C8C
-    static let graphiteFaint = Color(red: 0.72, green: 0.72, blue: 0.72)   // #B8B8B8
+    static let graphiteLight = Color(red: 0.60, green: 0.60, blue: 0.61)
+    static let graphiteFaint = Color(red: 0.74, green: 0.74, blue: 0.75)
     static let accent        = Color(red: 0.04, green: 0.52, blue: 1.00)   // #0A84FF
     static let accentSoft    = Color(red: 0.04, green: 0.52, blue: 1.00).opacity(0.30)
+    static let violet        = Color(red: 0.39, green: 0.37, blue: 0.88)   // #6360E0
     static let good          = Color(red: 0.30, green: 0.90, blue: 0.55)
     static let mid           = Color(red: 0.98, green: 0.83, blue: 0.22)
     static let bad           = Color(red: 1.00, green: 0.36, blue: 0.40)
@@ -110,8 +111,9 @@ struct LiquidBackground: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [AppPalette.baseMid, AppPalette.baseDeep,
-                                    Color(red: 0.06, green: 0.06, blue: 0.07)],
+            LinearGradient(colors: [Color(red: 0.27, green: 0.27, blue: 0.29),
+                                    Color(red: 0.20, green: 0.20, blue: 0.22),
+                                    Color(red: 0.14, green: 0.14, blue: 0.15)],
                            startPoint: .top, endPoint: .bottom)
             orbs
         }
@@ -171,6 +173,7 @@ struct PingBadge: View {
         if proxy.isGood { return AppPalette.good }
         if proxy.isMid { return AppPalette.mid }
         if proxy.isBad { return AppPalette.bad }
+        if proxy.isReachOnly { return AppPalette.graphiteLight }
         if proxy.ping == -1 { return Color.white.opacity(0.45) }
         return AppPalette.graphiteFaint.opacity(0.6)
     }
@@ -196,7 +199,7 @@ struct ProxyCard: View {
                     Spacer(minLength: 4)
                     PingBadge(proxy: proxy)
                 }
-                if !proxy.note.isEmpty && proxy.valid {
+                if !proxy.note.isEmpty && (proxy.valid || proxy.reachable) {
                     Text(proxy.note)
                         .font(.system(size: 9, weight: .medium))
                         .foregroundColor(AppPalette.graphiteFaint.opacity(0.85))
@@ -214,47 +217,106 @@ struct ProxyCard: View {
     }
 }
 
+// MARK: - Segment (стеклянная капсула-кнопка в стиле Liquid Glass)
+
+struct SegmentGlowStyle: ButtonStyle {
+    let on: Bool
+    let accentColor: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = Capsule()
+        configuration.label
+            .foregroundColor(on ? .white : AppPalette.graphiteFaint)
+            .background {
+                if on {
+                    shape
+                        .fill(LinearGradient(colors: [accentColor, accentColor.opacity(0.72)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .overlay(
+                            shape.fill(LinearGradient(colors: [Color.white.opacity(0.32), .clear],
+                                                      startPoint: .top, endPoint: .center))
+                        )
+                        .overlay(shape.strokeBorder(Color.white.opacity(0.26), lineWidth: 0.5))
+                        .shadow(color: accentColor.opacity(0.45), radius: 14, y: 3)
+                } else {
+                    shape
+                        .fill(AppPalette.baseMid.opacity(0.85))
+                        .overlay(shape.strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+                        .background(shape.fill(.ultraThinMaterial))
+                        .shadow(color: Color.black.opacity(0.25), radius: 6, y: 2)
+                }
+            }
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .brightness(configuration.isPressed ? -0.05 : (on ? 0.02 : 0))
+            .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+struct SegmentButton: View {
+    let isOn: Bool
+    let icon: String
+    let label: String
+    var accentColor: Color = AppPalette.accent
+    var width: CGFloat = 138
+    var height: CGFloat = 46
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .bold))
+                Text(label)
+                    .font(.system(size: 13, weight: .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(width: width, height: height)
+        }
+        .buttonStyle(SegmentGlowStyle(on: isOn, accentColor: accentColor))
+    }
+}
+
+// MARK: - Плавающий таб-бар (Прокси | Локальный)
+
+struct GlassTabBar: View {
+    @Binding var selection: MainTab
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(MainTab.allCases) { tab in
+                SegmentButton(isOn: selection == tab,
+                              icon: tab.icon,
+                              label: tab.label,
+                              width: 148) {
+                    withAnimation(.snappy(duration: 0.28)) { selection = tab }
+                }
+            }
+        }
+        .padding(6)
+        .modifier(GlassCard(cornerRadius: 28))
+        .frame(maxWidth: 330)
+        .padding(.horizontal, 4)
+    }
+}
+
 // MARK: - Mode switch (две отдельные кнопки MTProto / SOCKS5)
 
 struct ModeSwitch: View {
     @Binding var mode: String
 
-    private let items: [(key: String, label: String, icon: String)] = [
-        ("mtproto", "MTProto", "bolt.fill"),
-        ("socks5", "SOCKS5", "network")
-    ]
-
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(items, id: \.key) { item in
-                Button {
-                    withAnimation(.snappy(duration: 0.26)) { mode = item.key }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 12, weight: .bold))
-                        Text(item.label)
-                            .font(.system(size: 13, weight: .heavy))
-                    }
-                    .foregroundColor(mode == item.key ? .white : AppPalette.graphiteFaint)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background {
-                        if mode == item.key {
-                            Capsule()
-                                .fill(AppPalette.accent.opacity(0.42))
-                                .overlay(Capsule().strokeBorder(AppPalette.accent.opacity(0.55), lineWidth: 0.5))
-                        }
-                    }
-                }
-                .buttonStyle(SqueezeButtonStyle(scale: 0.94))
-                .if(mode != item.key) { view in
-                    view.glassEffect(.regular, in: .capsule)
-                }
+        HStack(spacing: 12) {
+            SegmentButton(isOn: mode == "mtproto", icon: "bolt.fill", label: "MTProto",
+                          accentColor: AppPalette.accent) {
+                withAnimation(.snappy(duration: 0.28)) { mode = "mtproto" }
+            }
+            SegmentButton(isOn: mode == "socks5", icon: "network", label: "SOCKS5",
+                          accentColor: AppPalette.violet) {
+                withAnimation(.snappy(duration: 0.28)) { mode = "socks5" }
             }
         }
-        .padding(5)
-        .modifier(GlassCard(cornerRadius: 999))
+        .padding(.horizontal, 2)
     }
 }
 
@@ -306,6 +368,10 @@ struct DockBar: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(AppPalette.good)
+                } else if proxy.reachable {
+                    Text("жив · без MTProto")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(AppPalette.graphiteLight)
                 } else {
                     Text("нет ответа")
                         .font(.system(size: 10, weight: .semibold))
@@ -426,6 +492,7 @@ struct InfoRow: View {
     var value: String
     var mono = false
     var accent = false
+    var tint: Color? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -441,7 +508,7 @@ struct InfoRow: View {
                 .font(mono
                       ? .system(size: 12, weight: .semibold).monospaced()
                       : .system(size: 12, weight: .semibold))
-                .foregroundColor(accent ? AppPalette.accent : AppPalette.graphiteFaint.opacity(0.92))
+                .foregroundColor(tint ?? (accent ? AppPalette.accent : AppPalette.graphiteFaint.opacity(0.92)))
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
         }
@@ -594,6 +661,13 @@ struct TunnelCard: View {
 
     private var fullSecret: String { BridgeTunnel.localSecretHex }
 
+    private var pingTint: Color {
+        if tunnel.wsFallbackActive { return AppPalette.mid }
+        if tunnel.relayPing > 0 { return AppPalette.good }
+        if tunnel.relayPing == -2 { return AppPalette.bad }
+        return AppPalette.graphiteFaint.opacity(0.8)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -626,6 +700,12 @@ struct TunnelCard: View {
                             mono: true, accent: revealSecret)
                 }
                 .buttonStyle(SqueezeButtonStyle(scale: 0.99))
+                if tunnel.isRunning {
+                    InfoRow(icon: "gauge", title: "Пинг реле",
+                            value: tunnel.relayPingText,
+                            mono: true,
+                            tint: pingTint)
+                }
                 if tunnel.wsFallbackActive {
                     InfoRow(icon: "globe", title: "Транспорт",
                             value: "WebSocket · kws Telegram DC", accent: true)

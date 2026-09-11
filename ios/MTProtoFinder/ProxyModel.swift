@@ -1,8 +1,8 @@
 import Foundation
 import Network
 
-let AUTHOR_URL = "https://t.me/miiko3"
-let APP_VERSION = "1.0.3"
+let AUTHOR_URL = "https://t.me/yetilov"
+let APP_VERSION = "1.0.4"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -32,6 +32,7 @@ struct Proxy: Identifiable {
     let proto: String
     var ping: Double = -1    // -1 in progress, -2 failed, >0 elapsed ms
     var valid: Bool = false
+    var reachable = false     // TCP жив, но MTProto-рукопожатие не прошло
     var note: String = ""
 
     var endpoint: String { "\(host):\(port)" }
@@ -42,7 +43,7 @@ struct Proxy: Identifiable {
     }
 
     var pingText: String {
-        if valid && ping > 0 { return String(format: "%.0f ms", ping) }
+        if ping > 0 && (valid || reachable) { return String(format: "%.0f ms", ping) }
         if ping == -2 { return "—" }
         if ping > 0 { return "✖" }
         return "…"
@@ -51,6 +52,7 @@ struct Proxy: Identifiable {
     var isGood: Bool { valid && ping > 0 && ping < 300 }
     var isMid: Bool { valid && ping >= 300 && ping < 1000 }
     var isBad: Bool { valid && ping >= 1000 }
+    var isReachOnly: Bool { reachable && !valid }
 }
 
 @MainActor
@@ -118,12 +120,22 @@ final class ProxyModel: ObservableObject {
             await withTaskGroup(of: Void.self) { group in
                 for p in targets {
                     group.addTask {
-                        let r = await Self.probe(p)
+                        var r = await Self.probe(p)
+                        var reachable = r.1
+                        if !r.1 {
+                            let tcp = await Self.tcpPing(host: p.host, port: p.port)
+                            if tcp > 0 {
+                                r.0 = tcp
+                                reachable = true
+                                r.2 = "сервер жив · MTProto не отвечает"
+                            }
+                        }
                         await MainActor.run {
                             self.allLock.lock()
                             if let i = self.all.firstIndex(where: { $0.id == p.id }) {
                                 self.all[i].ping = r.0
                                 self.all[i].valid = r.1
+                                self.all[i].reachable = reachable
                                 self.all[i].note = r.2
                             }
                             self.allLock.unlock()
@@ -140,11 +152,15 @@ final class ProxyModel: ObservableObject {
         let pl = pool()
         let valid = pl.filter { $0.valid && $0.ping > 0 }.sorted { $0.ping < $1.ping }
         let un = pl.filter { $0.ping == -1 }
-        let dead = pl.filter { !($0.valid && $0.ping > 0) && $0.ping != -1 }
-        top = Array((valid + un + dead).prefix(MAX_SERVERS))
+        let reach = pl.filter { !($0.valid && $0.ping > 0) && $0.ping != -1 && $0.reachable }
+        let dead = pl.filter { !($0.valid && $0.ping > 0) && $0.ping != -1 && !$0.reachable }
+        top = Array((valid + un + reach + dead).prefix(MAX_SERVERS))
         let live = valid.count
+        let alive = valid.count + reach.count
         if live > 0 {
-            status = "Рабочих прокси: \(live) · проверено \(top.count)"
+            status = "Рабочих: \(live) · живых: \(alive) · показано \(top.count)"
+        } else if alive > 0 {
+            status = "Живых без MTProto: \(alive) · показано \(top.count)"
         } else if un.isEmpty {
             status = "Живых прокси не найдено"
         } else {
