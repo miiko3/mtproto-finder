@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40miiko3-blue)](https://t.me/miiko3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.5-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.9-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -98,7 +98,21 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 |---|---|---|
 | Linux (AppImage) | 1.4.3 | ✅ стабильная |
 | Android (APK) | 0.1.3.5b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 1.0.5 | 🧪 бета, сборка unsigned через GitHub Actions |
+| iOS (SwiftUI, Liquid Glass) | 1.0.6 | 🧪 бета, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.9 (iOS 1.0.6)
+
+- 🛠 **Починка краша**: убрано всё «Liquid Glass» (`glassEffect`) и живая
+  анимация размытых шаров фона. На слабом GPU (iPhone SE 2020) стеклянные
+  эффекты поверх десятков карточек могли ронять приложение. Вместо них —
+  лёгкое матовое стекло на системных материалах (`ultraThinMaterial`) +
+  блик + обводка: тот же вид, но стабильно на любом iPhone.
+- 🧊 **Один стеклянный стиль везде**: все карточки, кнопки, чипы, таб-бар,
+  док и переключатель MTProto/SOCKS5 собираются одним примитивом
+  `glassLayer` — больше нет «разных» видов стекла между блоками.
+- 📱 **Вёрстка под маленькие экраны**: на ширине до 390 pt (SE 2020 / mini)
+  — одна удобная колонка в полную ширину, двух- и трёхколоночная сетка только
+  на более широких iPhone и iPad; контент не растягивается и не сжимается.
 
 ## Что нового в 1.4.8 (iOS 1.0.5)
 

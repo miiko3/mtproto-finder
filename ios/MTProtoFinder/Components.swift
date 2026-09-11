@@ -25,26 +25,51 @@ extension View {
     }
 }
 
-// MARK: - Glass primitives
+// MARK: - Glass primitives (лёгкое матовое стекло: материал + блик + обводка).
+// Материалы вместо glassEffect: одинаковый вид везде и безопасный GPU даже
+// на старых iPhone (например SE 2020), где Liquid Glass может ронять приложение.
+
+extension View {
+    /// Накладывает полупрозрачную стеклянную подложку заданной формы.
+    @ViewBuilder
+    func glassLayer(_ shape: some InsettableShape,
+                    material: Material = .regular,
+                    tint: Color = Color.white.opacity(0.03)) -> some View {
+        self
+            .background {
+                shape
+                    .fill(tint)
+                    .background(shape.fill(material))
+                    .overlay(
+                        shape.fill(
+                            LinearGradient(colors: [Color.white.opacity(0.14), .clear],
+                                           startPoint: .top, endPoint: .center)
+                        )
+                    )
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.6))
+            }
+    }
+
+    /// Карточка: материальное стекло с закруглениями + клип контента.
+    @ViewBuilder
+    func glassCard(_ radius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        self
+            .glassLayer(shape)
+            .clipShape(shape)
+    }
+
+    /// Капсула для кнопок/чипов.
+    @ViewBuilder
+    func glassCapsule() -> some View {
+        self.glassLayer(Capsule())
+    }
+}
 
 struct GlassCard: ViewModifier {
     var cornerRadius: CGFloat = 28
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content
-            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-            .overlay(
-                shape.fill(
-                    LinearGradient(colors: [
-                        Color.white.opacity(0.22),
-                        Color.white.opacity(0.03),
-                        Color.clear
-                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .blendMode(.plusLighter)
-                .allowsHitTesting(false)
-            )
-            .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+        content.glassCard(cornerRadius)
     }
 }
 
@@ -67,7 +92,7 @@ struct GlassButtonStyle: ButtonStyle {
             .brightness(configuration.isPressed ? -0.06 : (prominent ? 0.05 : 0))
             .opacity(configuration.isPressed ? 0.85 : 1)
             .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
-            .glassEffect(.regular, in: .capsule)
+            .glassCapsule()
     }
 }
 
@@ -107,8 +132,6 @@ struct AccentButtonStyle: ButtonStyle {
 // MARK: - Graphite background (цвета иконки + лёгкий акцент)
 
 struct LiquidBackground: View {
-    @State private var animating = false
-
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.27, green: 0.27, blue: 0.29),
@@ -118,23 +141,14 @@ struct LiquidBackground: View {
             orbs
         }
         .ignoresSafeArea()
-        .onAppear {
-            withAnimation(.easeInOut(duration: 16).repeatForever(autoreverses: true)) {
-                animating = true
-            }
-        }
     }
 
     private var orbs: some View {
         ZStack {
-            orb(AppPalette.graphiteSoft.opacity(0.32), radius: 210,
-                offset: animating ? CGSize(width: 160, height: -210) : CGSize(width: -140, height: 150))
-            orb(AppPalette.graphiteLight.opacity(0.16), radius: 250,
-                offset: animating ? CGSize(width: -190, height: 190) : CGSize(width: 160, height: -170))
-            orb(AppPalette.accent.opacity(0.13), radius: 220,
-                offset: animating ? CGSize(width: 90, height: 130) : CGSize(width: -120, height: -90))
-            orb(AppPalette.graphite.opacity(0.20), radius: 180,
-                offset: animating ? CGSize(width: -70, height: -130) : CGSize(width: 70, height: 90))
+            orb(AppPalette.graphiteSoft.opacity(0.32), radius: 210, offset: CGSize(width: -140, height: 150))
+            orb(AppPalette.graphiteLight.opacity(0.16), radius: 250, offset: CGSize(width: 160, height: -170))
+            orb(AppPalette.accent.opacity(0.13), radius: 220, offset: CGSize(width: -120, height: -90))
+            orb(AppPalette.graphite.opacity(0.20), radius: 180, offset: CGSize(width: 70, height: 90))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -173,7 +187,7 @@ struct PingBadge: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
+        .glassCapsule()
     }
 
     private var indicatorColor: Color {
@@ -253,11 +267,7 @@ struct SegmentGlowStyle: ButtonStyle {
         } else {
             configuration.label
                 .foregroundColor(AppPalette.graphiteFaint)
-                .background {
-                    shape.fill(AppPalette.baseMid.opacity(0.45))
-                        .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
-                }
-                .glassEffect(.regular, in: .capsule)
+                .glassCapsule()
                 .scaleEffect(configuration.isPressed ? 0.93 : 1)
                 .brightness(configuration.isPressed ? -0.06 : 0)
                 .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
@@ -351,7 +361,7 @@ struct StatusChip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
-        .glassEffect(.regular, in: .capsule)
+        .glassCapsule()
     }
 }
 

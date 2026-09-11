@@ -67,9 +67,9 @@ struct ContentView: View {
 
 private enum Layout {
     static func columns(_ width: CGFloat) -> Int {
-        if width < 240 { return 1 }
-        if width < 620 { return 2 }
-        return 3
+        if width >= 700 { return 3 }
+        if width >= 390 { return 2 }
+        return 1
     }
 
     static func insets(_ width: CGFloat) -> CGFloat {

@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "1.0.5"
+let APP_VERSION = "1.0.6"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
