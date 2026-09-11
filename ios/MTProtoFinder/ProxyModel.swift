@@ -116,7 +116,9 @@ final class ProxyModel: ObservableObject {
             if !untested.isEmpty {
                 targets = Array(untested.prefix(24))
             } else {
-                targets = Array((alive + reach + dead.shuffled().prefix(6)).prefix(MAX_SERVERS))
+                var poolForCheck = alive + reach
+                poolForCheck.append(contentsOf: dead.shuffled().prefix(6))
+                targets = Array(poolForCheck.prefix(MAX_SERVERS))
             }
             await MainActor.run { self.isSearching = !untested.isEmpty }
             await withTaskGroup(of: Void.self) { group in
