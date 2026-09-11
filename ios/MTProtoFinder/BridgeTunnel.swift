@@ -45,6 +45,13 @@ final class BridgeTunnel: ObservableObject {
         startRelayPinger(proxy)
     }
 
+    func resetRelay() {
+        relayPinger?.cancel()
+        relayPinger = nil
+        relayPing = -2
+        relayEndpoint = "kws.web.telegram.org:443"
+    }
+
     private func startRelayPinger(_ proxy: Proxy) {
         relayPinger?.cancel()
         relayPinger = Task { [weak self] in
@@ -351,10 +358,7 @@ final class BridgeSession: Hashable {
     private func fallbackToWS() {
         setTunnel { t in
             t.wsFallbackActive = true
-            t.relayPinger?.cancel()
-            t.relayPinger = nil
-            t.relayPing = -2
-            t.relayEndpoint = "kws.web.telegram.org:443"
+            t.resetRelay()
             t.detail = "Рабочих серверов нет — WebSocket-режим (Telegram DC)"
         }
         startWS()
