@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40miiko3-blue)](https://t.me/miiko3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.9-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.10-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -98,7 +98,21 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 |---|---|---|
 | Linux (AppImage) | 1.4.3 | ✅ стабильная |
 | Android (APK) | 0.1.3.5b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 1.0.6 | 🧪 бета, сборка unsigned через GitHub Actions |
+| iOS (SwiftUI, Liquid Glass) | 1.0.7 | 🧪 бета, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.10 (iOS 1.0.7)
+
+- 🧊 **Меню как в 1.0.3**: кнопки «Прокси|Локальный» и MTProto/SOCKS5 —
+  тот самый стиль меню (активная — градиентная капсула, неактивная — плоская).
+  Всё остальное приложение теперь **плоское**: карточки, чипы, статусы, док —
+  лёгкий градиент + тонкая обводка, без стеклянных материалов и блюра
+  (заодно это убирает основную нагрузку на GPU — краш уходит).
+- 📐 **Меню под 4.7"**: капсулы меню больше не растягиваются на всю ширину —
+  фиксированные компактные кнопки по центру (SE 2020 / iPhone 8, mini).
+- 📶 **Пинг перестал «молчать»**: мёртвые серверы записывались как «ещё не
+  проверен» (−1), из-за чего вместо значения крутился вечный спиннер. Теперь
+  после проверки у каждого сервера есть результат: `мс`, `—` (мёртв) или
+  `жив без MTProto`.
 
 ## Что нового в 1.4.9 (iOS 1.0.6)
 

@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "1.0.6"
+let APP_VERSION = "1.0.7"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -133,6 +133,9 @@ final class ProxyModel: ObservableObject {
                                 reachable = true
                                 r.2 = "сервер жив · MTProto не отвечает"
                             }
+                        }
+                        if r.0 <= 0 && !reachable {
+                            r.0 = -2
                         }
                         await MainActor.run {
                             self.allLock.lock()

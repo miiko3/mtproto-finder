@@ -25,51 +25,44 @@ extension View {
     }
 }
 
-// MARK: - Glass primitives (лёгкое матовое стекло: материал + блик + обводка).
-// Материалы вместо glassEffect: одинаковый вид везде и безопасный GPU даже
-// на старых iPhone (например SE 2020), где Liquid Glass может ронять приложение.
+// MARK: - Flat primitives (плоские поверхности).
+// Весь UI плоский: лёгкий градиент + тонкая обводка, без материалов и блюра.
+// Стеклянный «меню-стиль» из 1.0.3 остаётся только у кнопок меню
+// (SegmentGlowStyle: активная капсула — градиент акцента, неактивная — плоская).
 
 extension View {
-    /// Накладывает полупрозрачную стеклянную подложку заданной формы.
     @ViewBuilder
-    func glassLayer(_ shape: some InsettableShape,
-                    material: Material = .regular,
-                    tint: Color = Color.white.opacity(0.03)) -> some View {
-        self
-            .background {
-                shape
-                    .fill(tint)
-                    .background(shape.fill(material))
-                    .overlay(
-                        shape.fill(
-                            LinearGradient(colors: [Color.white.opacity(0.14), .clear],
-                                           startPoint: .top, endPoint: .center)
-                        )
-                    )
-                    .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.6))
-            }
+    func flatSurface(_ shape: some InsettableShape) -> some View {
+        self.background {
+            shape
+                .fill(
+                    LinearGradient(colors: [Color.white.opacity(0.085), Color.white.opacity(0.035)],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+                .overlay(shape.strokeBorder(Color.white.opacity(0.08), lineWidth: 0.6))
+        }
     }
 
-    /// Карточка: материальное стекло с закруглениями + клип контента.
+    /// Карточка: плоская поверхность с закруглениями + клип контента.
     @ViewBuilder
-    func glassCard(_ radius: CGFloat) -> some View {
+    func flatCard(_ radius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         self
-            .glassLayer(shape)
+            .flatSurface(shape)
             .clipShape(shape)
     }
 
     /// Капсула для кнопок/чипов.
     @ViewBuilder
-    func glassCapsule() -> some View {
-        self.glassLayer(Capsule())
+    func flatCapsule() -> some View {
+        self.flatSurface(Capsule())
     }
 }
 
 struct GlassCard: ViewModifier {
     var cornerRadius: CGFloat = 28
     func body(content: Content) -> some View {
-        content.glassCard(cornerRadius)
+        content.flatCard(cornerRadius)
     }
 }
 
@@ -92,7 +85,7 @@ struct GlassButtonStyle: ButtonStyle {
             .brightness(configuration.isPressed ? -0.06 : (prominent ? 0.05 : 0))
             .opacity(configuration.isPressed ? 0.85 : 1)
             .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
-            .glassCapsule()
+            .flatCapsule()
     }
 }
 
@@ -133,32 +126,11 @@ struct AccentButtonStyle: ButtonStyle {
 
 struct LiquidBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.27, green: 0.27, blue: 0.29),
-                                    Color(red: 0.20, green: 0.20, blue: 0.22),
-                                    Color(red: 0.14, green: 0.14, blue: 0.15)],
-                           startPoint: .top, endPoint: .bottom)
-            orbs
-        }
-        .ignoresSafeArea()
-    }
-
-    private var orbs: some View {
-        ZStack {
-            orb(AppPalette.graphiteSoft.opacity(0.32), radius: 210, offset: CGSize(width: -140, height: 150))
-            orb(AppPalette.graphiteLight.opacity(0.16), radius: 250, offset: CGSize(width: 160, height: -170))
-            orb(AppPalette.accent.opacity(0.13), radius: 220, offset: CGSize(width: -120, height: -90))
-            orb(AppPalette.graphite.opacity(0.20), radius: 180, offset: CGSize(width: 70, height: 90))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func orb(_ color: Color, radius: CGFloat, offset: CGSize) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: radius * 2, height: radius * 2)
-            .blur(radius: radius * 0.95)
-            .offset(offset)
+        LinearGradient(colors: [Color(red: 0.27, green: 0.27, blue: 0.29),
+                                Color(red: 0.20, green: 0.20, blue: 0.22),
+                                Color(red: 0.14, green: 0.14, blue: 0.15)],
+                       startPoint: .top, endPoint: .bottom)
+            .ignoresSafeArea()
     }
 }
 
@@ -187,7 +159,7 @@ struct PingBadge: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
-        .glassCapsule()
+        .flatCapsule()
     }
 
     private var indicatorColor: Color {
@@ -267,7 +239,7 @@ struct SegmentGlowStyle: ButtonStyle {
         } else {
             configuration.label
                 .foregroundColor(AppPalette.graphiteFaint)
-                .glassCapsule()
+                .flatCapsule()
                 .scaleEffect(configuration.isPressed ? 0.93 : 1)
                 .brightness(configuration.isPressed ? -0.06 : 0)
                 .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
@@ -311,12 +283,12 @@ struct GlassTabBar: View {
             ForEach(MainTab.allCases) { tab in
                 SegmentButton(isOn: selection == tab,
                               icon: tab.icon,
-                              label: tab.label) {
+                              label: tab.label,
+                              width: 116) {
                     withAnimation(.snappy(duration: 0.28)) { selection = tab }
                 }
             }
         }
-        .frame(maxWidth: 340)
     }
 }
 
@@ -328,15 +300,14 @@ struct ModeSwitch: View {
     var body: some View {
         HStack(spacing: 12) {
             SegmentButton(isOn: mode == "mtproto", icon: "bolt.fill", label: "MTProto",
-                          accentColor: AppPalette.accent) {
+                          accentColor: AppPalette.accent, width: 116) {
                 withAnimation(.snappy(duration: 0.28)) { mode = "mtproto" }
             }
             SegmentButton(isOn: mode == "socks5", icon: "network", label: "SOCKS5",
-                          accentColor: AppPalette.violet) {
+                          accentColor: AppPalette.violet, width: 116) {
                 withAnimation(.snappy(duration: 0.28)) { mode = "socks5" }
             }
         }
-        .frame(maxWidth: 340)
     }
 }
 
@@ -361,7 +332,7 @@ struct StatusChip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
-        .glassCapsule()
+        .flatCapsule()
     }
 }
 
