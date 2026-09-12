@@ -28,7 +28,7 @@ extension View {
 // MARK: - Flat primitives (плоские поверхности).
 // Весь UI плоский: лёгкий градиент + тонкая обводка, без материалов и блюра.
 // Стеклянный «меню-стиль» из 1.0.3 остаётся только у кнопок меню
-// (SegmentGlowStyle: активная капсула — градиент акцента, неактивная — плоская).
+// (MenuPillStyle: активная капсула — прозрачный акцент + свечение, как в 1.0.3).
 
 extension View {
     @ViewBuilder
@@ -100,24 +100,22 @@ struct AccentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let shape = Capsule()
         configuration.label
+            .foregroundColor(.white)
             .background {
                 shape
-                    .fill(
-                        LinearGradient(colors: [AppPalette.accent, AppPalette.accent.opacity(0.70)],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-                    .opacity(configuration.isPressed ? 0.70 : 0.85)
+                    .fill(AppPalette.accent.opacity(0.42))
                     .overlay(
                         shape.fill(
-                            LinearGradient(colors: [Color.white.opacity(0.32), Color.clear],
+                            LinearGradient(colors: [Color.white.opacity(0.18), .clear],
                                            startPoint: .top, endPoint: .center)
                         )
                     )
-                    .overlay(shape.strokeBorder(Color.white.opacity(0.24), lineWidth: 0.5))
-                    .shadow(color: AppPalette.accent.opacity(configuration.isPressed ? 0.12 : 0.45),
-                            radius: configuration.isPressed ? 4 : 14, y: configuration.isPressed ? 1 : 4)
+                    .overlay(shape.strokeBorder(AppPalette.accent.opacity(0.6), lineWidth: 0.6))
+                    .shadow(color: AppPalette.accent.opacity(configuration.isPressed ? 0.15 : 0.45),
+                            radius: configuration.isPressed ? 4 : 12,
+                            y: configuration.isPressed ? 1 : 3)
             }
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
     }
 }
@@ -210,50 +208,50 @@ struct ProxyCard: View {
     }
 }
 
-// MARK: - Segment (стеклянная капсула-кнопка в стиле Liquid Glass)
+// MARK: - Menu buttons (стиль 1.0.3: полупрозрачная акцентная капсула + свечение)
 
-struct SegmentGlowStyle: ButtonStyle {
-    let on: Bool
-    let accentColor: Color
-
-    @ViewBuilder
-    func makeBody(configuration: Configuration) -> some View {
-        let shape = Capsule()
-        if on {
-            configuration.label
-                .foregroundColor(.white)
-                .background {
-                    shape
-                        .fill(LinearGradient(colors: [accentColor, accentColor.opacity(0.72)],
-                                             startPoint: .top, endPoint: .bottom))
-                        .overlay(
-                            shape.fill(LinearGradient(colors: [Color.white.opacity(0.32), .clear],
-                                                      startPoint: .top, endPoint: .center))
-                        )
-                        .overlay(shape.strokeBorder(Color.white.opacity(0.26), lineWidth: 0.5))
-                        .shadow(color: accentColor.opacity(0.4), radius: 14, y: 3)
-                }
-                .scaleEffect(configuration.isPressed ? 0.93 : 1)
-                .brightness(configuration.isPressed ? -0.05 : 0.02)
-                .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
-        } else {
-            configuration.label
-                .foregroundColor(AppPalette.graphiteFaint)
-                .flatCapsule()
-                .scaleEffect(configuration.isPressed ? 0.93 : 1)
-                .brightness(configuration.isPressed ? -0.06 : 0)
-                .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
-        }
+struct MenuPillContainer: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(5)
+            .modifier(GlassCard(cornerRadius: 999))
     }
 }
 
-struct SegmentButton: View {
+struct MenuPillStyle: ButtonStyle {
+    let on: Bool
+    let accentColor: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(on ? .white : AppPalette.graphiteFaint)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background {
+                if on {
+                    Capsule()
+                        .fill(accentColor.opacity(0.42))
+                        .overlay(
+                            Capsule().fill(
+                                LinearGradient(colors: [Color.white.opacity(0.18), .clear],
+                                               startPoint: .top, endPoint: .center)
+                            )
+                        )
+                        .overlay(Capsule().strokeBorder(accentColor.opacity(0.55), lineWidth: 0.6))
+                        .shadow(color: accentColor.opacity(0.4), radius: 12, y: 3)
+                }
+            }
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(.spring(response: 0.30, dampingFraction: 0.58), value: configuration.isPressed)
+    }
+}
+
+struct MenuPillButton: View {
     let isOn: Bool
     let icon: String
     let label: String
     var accentColor: Color = AppPalette.accent
-    var width: CGFloat? = nil
-    var height: CGFloat = 46
     var action: () -> Void
 
     var body: some View {
@@ -266,29 +264,28 @@ struct SegmentButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .frame(maxWidth: width == nil ? .infinity : nil)
-            .frame(width: width, height: height)
         }
-        .buttonStyle(SegmentGlowStyle(on: isOn, accentColor: accentColor))
+        .buttonStyle(MenuPillStyle(on: isOn, accentColor: accentColor))
     }
 }
 
-// MARK: - Плавающий таб-бар (Прокси | Локальный)
+// MARK: - Плавающий таб-бар (Прокси | Локальный) — общая пилюля как в 1.0.3
 
 struct GlassTabBar: View {
     @Binding var selection: MainTab
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 5) {
             ForEach(MainTab.allCases) { tab in
-                SegmentButton(isOn: selection == tab,
-                              icon: tab.icon,
-                              label: tab.label,
-                              width: 116) {
-                    withAnimation(.snappy(duration: 0.28)) { selection = tab }
+                MenuPillButton(isOn: selection == tab,
+                               icon: tab.icon,
+                               label: tab.label) {
+                    withAnimation(.snappy(duration: 0.26)) { selection = tab }
                 }
             }
         }
+        .modifier(MenuPillContainer())
+        .frame(maxWidth: 340)
     }
 }
 
@@ -299,15 +296,16 @@ struct ModeSwitch: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            SegmentButton(isOn: mode == "mtproto", icon: "bolt.fill", label: "MTProto",
-                          accentColor: AppPalette.accent, width: 116) {
-                withAnimation(.snappy(duration: 0.28)) { mode = "mtproto" }
+            MenuPillButton(isOn: mode == "mtproto", icon: "bolt.fill", label: "MTProto",
+                           accentColor: AppPalette.accent) {
+                withAnimation(.snappy(duration: 0.26)) { mode = "mtproto" }
             }
-            SegmentButton(isOn: mode == "socks5", icon: "network", label: "SOCKS5",
-                          accentColor: AppPalette.violet, width: 116) {
-                withAnimation(.snappy(duration: 0.28)) { mode = "socks5" }
+            MenuPillButton(isOn: mode == "socks5", icon: "network", label: "SOCKS5",
+                           accentColor: AppPalette.violet) {
+                withAnimation(.snappy(duration: 0.26)) { mode = "socks5" }
             }
         }
+        .frame(maxWidth: 340)
     }
 }
 

@@ -74,25 +74,34 @@ final class ObfCipher: @unchecked Sendable {
     }
 }
 
+private final class ReachBox: @unchecked Sendable {
+    var tcpReady = false
+    var readyAt = Date()
+}
+
 private final class DeepProbeFinisher: @unchecked Sendable {
     private let once: Once
     private let timer: DispatchSourceTimer
     private let conn: NWConnection
-    private let cont: CheckedContinuation<(Double, Bool), Never>
+    private let reach: ReachBox
+    private let cont: CheckedContinuation<(Double, Bool, Bool), Never>
 
-    init(once: Once, timer: DispatchSourceTimer, conn: NWConnection,
-         cont: CheckedContinuation<(Double, Bool), Never>) {
+    init(once: Once, timer: DispatchSourceTimer, conn: NWConnection, reach: ReachBox,
+         cont: CheckedContinuation<(Double, Bool, Bool), Never>) {
         self.once = once
         self.timer = timer
         self.conn = conn
+        self.reach = reach
         self.cont = cont
     }
 
     func call(_ ms: Double, _ ok: Bool) {
         once.fire {
+            let r = self.reach
+            let finalMS = ok ? ms : (r.tcpReady ? Date().timeIntervalSince(r.readyAt) * 1000 : -2)
             self.timer.cancel()
             self.conn.cancel()
-            self.cont.resume(returning: (ms, ok))
+            self.cont.resume(returning: (finalMS, ok, r.tcpReady))
         }
     }
 }
@@ -194,12 +203,13 @@ private func parseResPQ(_ data: Data, framing: ObfFraming, nonce: Data) -> Bool?
 }
 
 /// Full MTProto round-trip ping: obfuscated2 handshake + req_pq_multi == ResPQ.
-/// Returns (elapsed ms, validated). -2.0/"dead" on failure, positive ms + true
-/// only when the proxy really answered with the correct ResPQ.
-func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 4.0) async -> (Double, Bool) {
+/// Returns (elapsed ms, valid, reachable). positive ms + valid=true only when the
+/// proxy really answered the correct ResPQ. reachable=true means TCP connected
+/// but MTProto not validated ("сервер жив").
+func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 4.0) async -> (Double, Bool, Bool) {
     await withCheckedContinuation { cont in
         guard let portV = NWEndpoint.Port(rawValue: UInt16(port)) else {
-            cont.resume(returning: (-2.0, false)); return
+            cont.resume(returning: (-2.0, false, false)); return
         }
         let lower = secret.lowercased()
         let isIntermediate = lower.hasPrefix("dd") && lower.count == 34
@@ -208,7 +218,7 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
 
         guard let initBytes = obfuscatedInit(tag: tag, dcID: 2),
               let secretData = mtprotoSecretBytes(secret) else {
-            cont.resume(returning: (-2.0, false)); return
+            cont.resume(returning: (-2.0, false, false)); return
         }
 
         let region = Data(initBytes[8..<56])
@@ -248,6 +258,7 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
         let queue = DispatchQueue(label: "mtprotofinder.deep")
         let once = Once()
         let start = Date()
+        let reach = ReachBox()
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + max(1.0, timeout))
@@ -255,7 +266,8 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
         var recvBuf = Data()
         let dec = ObfCipher(key: rk, iv: riv)
 
-        let finish = DeepProbeFinisher(once: once, timer: timer, conn: conn, cont: cont)
+        let finish = DeepProbeFinisher(once: once, timer: timer, conn: conn,
+                                       reach: reach, cont: cont)
         timer.setEventHandler { finish.call(-2.0, false) }
         timer.resume()
 
@@ -277,6 +289,8 @@ func deepMTProtoPing(host: String, port: Int, secret: String, timeout: Double = 
         conn.stateUpdateHandler = { state in
             switch state {
             case .ready:
+                reach.tcpReady = true
+                reach.readyAt = Date()
                 conn.send(content: packet, completion: .contentProcessed { error in
                     if error != nil {
                         finish.call(-2.0, false)

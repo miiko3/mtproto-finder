@@ -2,7 +2,7 @@
 
 [![Author](https://img.shields.io/badge/author-%40miiko3-blue)](https://t.me/miiko3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.10-orange)](../../releases/latest)
+[![Version](https://img.shields.io/badge/version-1.4.11-orange)](../../releases/latest)
 [![Boosty](https://img.shields.io/badge/%F0%9F%9A%80-Boosty-ff4d8b)](https://boosty.to/miilo3)
 
 Приложение, которое само находит в интернете **рабочие прокси для Telegram** —
@@ -98,7 +98,24 @@ SOCKS5: [monosans/proxy-list](https://github.com/monosans/proxy-list),
 |---|---|---|
 | Linux (AppImage) | 1.4.3 | ✅ стабильная |
 | Android (APK) | 0.1.3.5b | 🧪 бета |
-| iOS (SwiftUI, Liquid Glass) | 1.0.7 | 🧪 бета, сборка unsigned через GitHub Actions |
+| iOS (SwiftUI, Liquid Glass) | 1.0.8 | 🧪 бета, сборка unsigned через GitHub Actions |
+
+## Что нового в 1.4.11 (iOS 1.0.8)
+
+- 🛠 **Краш починен по логу**: падение было в `tcpPing` — `Int32(1
+  << 31)` (когда FD сокета % 32 == 31) → переполнение → trap → EXC_BREAKPOINT.
+  Функция `tcpPing` убрана целиком; живучесть сервера определяется
+  прямо в NWConnection внутри probe (один коннект, без второго DNS).
+- 📶 **Пинг теперь отображается**: вместо десятков параллельных
+  getaddrinfo (MDNS-шторм вешал DNS на SE 2020) — один NWConnection
+  на каждую проверку, batch снижен до 12; «живые без MTProto» сразу
+  получают `мс`, «мёртвые» — честный `—` вместо вечного спиннера.
+- 🧩 **Единый стиль всех кнопок** как в 1.0.3: нижний таб-бар
+  «Прокси|Локальный» — общая пилюля с двумя акцентными капсулами
+  (полупрозрачный залив + свечение + обводка). Вся остальная кнопочная
+  панель (MTProto/SOCKS5, «Подключиться», «В Telegram», «Скопировать»)
+  использует тот же дизайн акцент-капсулы. Всё остальное — плоское.
+- 📐 Меню под 4.7" компактное.
 
 ## Что нового в 1.4.10 (iOS 1.0.7)
 

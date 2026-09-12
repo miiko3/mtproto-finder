@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 let AUTHOR_URL = "https://t.me/yetilov"
-let APP_VERSION = "1.0.7"
+let APP_VERSION = "1.0.8"
 let MAX_SERVERS = 32
 let MT_SOURCES = [
     "https://cdn.jsdelivr.net/gh/ALIILAPRO/MTProtoProxy@main/proxies.json",
@@ -114,10 +114,10 @@ final class ProxyModel: ObservableObject {
             let dead = pl.filter { !$0.valid && !$0.reachable && $0.ping == -2 }
             let targets: [Proxy]
             if !untested.isEmpty {
-                targets = Array(untested.prefix(24))
+                targets = Array(untested.prefix(12))
             } else {
                 var poolForCheck = alive + reach
-                poolForCheck.append(contentsOf: dead.shuffled().prefix(6))
+                poolForCheck.append(contentsOf: dead.shuffled().prefix(4))
                 targets = Array(poolForCheck.prefix(MAX_SERVERS))
             }
             await MainActor.run { self.isSearching = !untested.isEmpty }
@@ -125,16 +125,7 @@ final class ProxyModel: ObservableObject {
                 for p in targets {
                     group.addTask {
                         var r = await Self.probe(p)
-                        var reachable = r.1
-                        if !r.1 {
-                            let tcp = await Self.tcpPing(host: p.host, port: p.port)
-                            if tcp > 0 {
-                                r.0 = tcp
-                                reachable = true
-                                r.2 = "сервер жив · MTProto не отвечает"
-                            }
-                        }
-                        if r.0 <= 0 && !reachable {
+                        if r.0 <= 0 && !r.1 && !r.2 {
                             r.0 = -2
                         }
                         await MainActor.run {
@@ -142,8 +133,8 @@ final class ProxyModel: ObservableObject {
                             if let i = self.all.firstIndex(where: { $0.id == p.id }) {
                                 self.all[i].ping = r.0
                                 self.all[i].valid = r.1
-                                self.all[i].reachable = reachable
-                                self.all[i].note = r.2
+                                self.all[i].reachable = r.2
+                                self.all[i].note = r.3
                             }
                             self.allLock.unlock()
                         }
@@ -229,27 +220,29 @@ final class ProxyModel: ObservableObject {
 
     // MARK: - Pings
 
-    static func probe(_ p: Proxy) async -> (Double, Bool, String) {
+    static func probe(_ p: Proxy) async -> (Double, Bool, Bool, String) {
         if p.proto == "socks5" {
-            let (ms, ok) = await socksProbe(host: p.host, port: p.port)
-            return (ms, ok, ok ? "SOCKS5 · CONNECT ok" : "")
+            let (ms, ok, reachable) = await socksProbe(host: p.host, port: p.port)
+            return (ms, ok, reachable, ok ? "SOCKS5 · CONNECT ok"
+                                          : (reachable ? "сервер жив · SOCKS не работает" : ""))
         }
         let lower = p.secret.lowercased()
         if lower.hasPrefix("ee") {
             for sni in sniCandidates(secret: p.secret, host: p.host) {
                 switch await fakeTLSPing(host: p.host, port: p.port, secret: p.secret, sni: sni) {
                 case .success(let ms):
-                    return (ms, true, "FakeTLS · \(sni) · ResPQ ok")
+                    return (ms, true, true, "FakeTLS · \(sni) · ResPQ ok")
                 case .notMTProto:
-                    return (-2.0, false, "")
+                    return (-2.0, false, true, "TLS жив · MTProto не отвечает")
                 case .tlsFailed:
                     continue
                 }
             }
-            return (-2.0, false, "")
+            return (-2.0, false, false, "")
         }
-        let (ms, ok) = await deepMTProtoPing(host: p.host, port: p.port, secret: p.secret)
-        return (ms, ok, ok ? "MTProto · ResPQ ok" : "")
+        let (ms, ok, reachable) = await deepMTProtoPing(host: p.host, port: p.port, secret: p.secret)
+        return (ms, ok, reachable, ok ? "MTProto · ResPQ ok"
+                                      : (reachable ? "сервер жив · MTProto не отвечает" : ""))
     }
 
     static func domainFromSecret(_ sec: String) -> String {
@@ -310,66 +303,24 @@ final class ProxyModel: ObservableObject {
         }
     }
 
-    static func tcpPing(host: String, port: Int) async -> Double {
-        await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .utility).async {
-                let start = Date()
-                let sock = socket(AF_INET, SOCK_STREAM, 0)
-                guard sock >= 0 else { cont.resume(returning: -2); return }
-                var addr = sockaddr_in()
-                addr.sin_family = sa_family_t(AF_INET)
-                addr.sin_port = UInt16(port).bigEndian
-                if inet_pton(AF_INET, host, &addr.sin_addr) != 1 {
-                    var hints = addrinfo()
-                    hints.ai_family = AF_INET
-                    hints.ai_socktype = SOCK_STREAM
-                    var list: UnsafeMutablePointer<addrinfo>? = nil
-                    guard getaddrinfo(host, nil, &hints, &list) == 0, let first = list else {
-                        close(sock); cont.resume(returning: -2); return
-                    }
-                    first.pointee.ai_addr!.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { p in
-                        addr.sin_addr = p.pointee.sin_addr
-                    }
-                    freeaddrinfo(list)
-                }
-                _ = fcntl(sock, F_SETFL, O_NONBLOCK)
-                var addrCopy = addr
-                let connectResult = withUnsafePointer(to: &addrCopy) {
-                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                        connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-                    }
-                }
-                if connectResult == 0 {
-                    close(sock)
-                    cont.resume(returning: Date().timeIntervalSince(start) * 1000)
-                    return
-                }
-                var fds = fd_set()
-                withUnsafeMutablePointer(to: &fds) { $0.pointee.fds_bits.0 = 0 }
-                fds.fds_bits.0 = Int32(1 << (sock % 32))
-                var tv = timeval(tv_sec: 3, tv_usec: 0)
-                let sel = select(sock + 1, nil, &fds, nil, &tv)
-                close(sock)
-                cont.resume(returning: sel > 0 ? Date().timeIntervalSince(start) * 1000 : -2)
-            }
-        }
-    }
-
     /// Real SOCKS5 probe: greeting (05 01 00) + CONNECT to the proxy's own
     /// endpoint. Valid only when the server replies 05 00 to both.
-    static func socksProbe(host: String, port: Int, timeout: Double = 6.0) async -> (Double, Bool) {
+    /// Returns (ms, valid, reachable). reachable = TCP/SOCKS handshake alive
+    /// but the proxy couldn't complete CONNECT.
+    static func socksProbe(host: String, port: Int, timeout: Double = 6.0) async -> (Double, Bool, Bool) {
         await withCheckedContinuation { cont in
             guard let portV = NWEndpoint.Port(rawValue: UInt16(port)), portV.rawValue <= 65535 else {
-                cont.resume(returning: (-2.0, false)); return
+                cont.resume(returning: (-2.0, false, false)); return
             }
             let conn = NWConnection(host: NWEndpoint.Host(host), port: portV, using: .tcp)
             let queue = DispatchQueue(label: "mtprotofinder.socks")
             let once = Once()
             let start = Date()
+            var tcpReady = false
 
             let name = Array(host.utf8)
             guard name.count >= 1, name.count <= 255 else {
-                cont.resume(returning: (-2.0, false)); return
+                cont.resume(returning: (-2.0, false, false)); return
             }
             var req = Data([0x05, 0x01, 0x00, 0x03, UInt8(name.count)])
             req.append(contentsOf: name)
@@ -378,7 +329,7 @@ final class ProxyModel: ObservableObject {
             func done(_ ms: Double, _ ok: Bool) {
                 once.fire {
                     conn.cancel()
-                    cont.resume(returning: (ms, ok))
+                    cont.resume(returning: (ms, ok, tcpReady))
                 }
             }
 
@@ -390,6 +341,7 @@ final class ProxyModel: ObservableObject {
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
+                    tcpReady = true
                     conn.send(content: Data([0x05, 0x01, 0x00]), completion: .contentProcessed { _ in
                         conn.receive(minimumIncompleteLength: 2, maximumLength: 2048) { data, _, _, error in
                             guard let d = data, error == nil, d.count >= 2, d[0] == 0x05, d[1] == 0x00 else {
