@@ -170,6 +170,7 @@ class LocalBridge implements Runnable {
                 return;
             }
             int dc = (short) ((plain64[60] & 0xFF) | ((plain64[61] & 0xFF) << 8));
+            if (dc < 0) dc = -dc;
             if (dc == 0) dc = 2;
 
             MainActivity.Proxy p = pick.pick();
@@ -193,13 +194,12 @@ class LocalBridge implements Runnable {
                 return;
             }
 
-            String dom = MainActivity.Net.domainFromSecret(p.secret);
-            java.util.List<String> snis = new java.util.ArrayList<>();
-            for (String d : new String[]{dom, p.host, "www.cloudflare.com"})
-                if (d != null && d.contains(".") && !snis.contains(d)) snis.add(d);
+            java.util.List<String> snis = MainActivity.Net.sniList(p);
 
+            // Тот же путь, которым прокси был проверен при пинге (нативный TLS
+            // по SNI из секрета), — если пинг прошёл, релей тоже пройдёт.
             try {
-                javax.net.ssl.SSLSocket ss = tlsSocket(p.host, p.port, snis.get(0));
+                javax.net.ssl.SSLSocket ss = MainActivity.Net.tlsSocket(p.host, p.port, snis.get(0), 8);
                 final HS up = build(tag, dc, secret);
                 final javax.net.ssl.SSLSocket fss = ss;
                 OutputStream uo = fss.getOutputStream();
@@ -282,23 +282,6 @@ class LocalBridge implements Runnable {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    javax.net.ssl.SSLSocket tlsSocket(String host, int port, String sni) throws Exception {
-        javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
-        ctx.init(null, new javax.net.ssl.TrustManager[]{new javax.net.ssl.X509TrustManager(){
-            public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
-            public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
-            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
-        }}, null);
-        javax.net.ssl.SSLSocket ss = (javax.net.ssl.SSLSocket) ctx.getSocketFactory().createSocket();
-        ss.connect(new InetSocketAddress(host, port), 8000);
-        javax.net.ssl.SSLParameters sp = new javax.net.ssl.SSLParameters();
-        sp.setServerNames(java.util.Collections.singletonList(new javax.net.ssl.SNIHostName(sni)));
-        ss.setSSLParameters(sp);
-        ss.setSoTimeout(10000);
-        ss.startHandshake();
-        return ss;
     }
 
     void pipePlain(Socket src, Socket dst, Cipher dec, Cipher enc, boolean wrapRecords) {

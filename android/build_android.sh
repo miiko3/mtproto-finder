@@ -1,19 +1,24 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
+VERSION_NAME="0.2.0"
+VERSION_CODE="20"
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
 BT="$SDK/build-tools/34.0.0"
 PLATFORM="$SDK/platforms/android-34/android.jar"
 rm -rf build
 mkdir -p build/gen build/obj build/out
+sed -e "s/android:versionName=\"[^\"]*\"/android:versionName=\"$VERSION_NAME\"/" \
+    -e "s/android:versionCode=\"[0-9]*\"/android:versionCode=\"$VERSION_CODE\"/" \
+    AndroidManifest.xml > build/AndroidManifest.xml
 "$BT/aapt2" compile --dir res -o build/res.zip
-"$BT/aapt2" link -o build/base.apk -I "$PLATFORM" --manifest AndroidManifest.xml -R build/res.zip --java build/gen --auto-add-overlay
-javac --release 8 -nowarn -classpath "$PLATFORM" -d build/obj build/gen/com/miiko3/mtprotofinder/R.java $(find src -name "*.java")
+"$BT/aapt2" link -o build/base.apk -I "$PLATFORM" --manifest build/AndroidManifest.xml -R build/res.zip --java build/gen --auto-add-overlay
+javac --release 8 -nowarn -encoding UTF-8 -classpath "$PLATFORM" -d build/obj build/gen/com/miiko3/mtprotofinder/R.java $(find src -name "*.java")
 "$BT/d8" --release --min-api 24 --lib "$PLATFORM" --output build/out $(find build/obj -name '*.class')
 cd build && cp base.apk unsigned.apk && zip -qj unsigned.apk out/classes.dex && cd ..
 if [ ! -f keystore.jks ]; then
 keytool -genkeypair -v -keystore keystore.jks -alias mtproto -keyalg RSA -keysize 2048 -validity 10000 -storepass mtprotofinder -keypass mtprotofinder -dname "CN=MTProto Finder,OU=miiko3,O=yetilov,C=RU"
 fi
 "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
-"$BT/apksigner" sign --ks keystore.jks --ks-pass pass:mtprotofinder --key-pass pass:mtprotofinder --out MTProto-Finder-v0.1.3.5b.apk build/aligned.apk
-"$BT/apksigner" verify MTProto-Finder-v0.1.3.5b.apk && echo "OK: MTProto-Finder-v0.1.3.5b.apk"
+"$BT/apksigner" sign --ks keystore.jks --ks-pass pass:mtprotofinder --key-pass pass:mtprotofinder --out "MTProto-Finder-v$VERSION_NAME.apk" build/aligned.apk
+"$BT/apksigner" verify "MTProto-Finder-v$VERSION_NAME.apk" && echo "OK: MTProto-Finder-v$VERSION_NAME.apk"
