@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
-VERSION_NAME="0.2.0"
-VERSION_CODE="20"
+VERSION_NAME="0.2.1"
+VERSION_CODE="21"
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
 BT="$SDK/build-tools/34.0.0"
 PLATFORM="$SDK/platforms/android-34/android.jar"

@@ -2,8 +2,8 @@
 # Replaces build_android.sh; mirrors it step for step.
 #   pwsh -File build_android.ps1
 param(
-    [string]$VersionName = "0.2.0",
-    [int]$VersionCode = 20
+    [string]$VersionName = "0.2.1",
+    [int]$VersionCode = 21
 )
 
 $ErrorActionPreference = "Stop"

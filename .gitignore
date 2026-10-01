@@ -9,3 +9,4 @@ android/*.apk
 android/build_android_out/
 android/*.idsig
 ios/*.ipa
+android/tools/*.log

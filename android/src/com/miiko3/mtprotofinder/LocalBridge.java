@@ -49,11 +49,23 @@ class LocalBridge implements Runnable {
     private final Picker pick;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ServerSocket server;
+    private volatile boolean bound;
+    private volatile String error;
     private Thread loop;
 
     LocalBridge(int port, Picker pick) {
         this.port = port;
         this.pick = pick;
+    }
+
+    // Успело ли сокет реально открыться. run() выполняется в отдельном потоке,
+    // поэтому результат проверяется отдельно, а не по факту вызова start().
+    boolean isBound() {
+        return bound && running.get();
+    }
+
+    String lastError() {
+        return error;
     }
 
     void start() {
@@ -79,6 +91,9 @@ class LocalBridge implements Runnable {
     public void run() {
         try {
             server = new ServerSocket(port, 16, InetAddress.getByName("127.0.0.1"));
+            bound = true;
+            error = null;
+            MainActivity.log("bridge: listening on 127.0.0.1:%d", port);
             server.setSoTimeout(1000);
             while (running.get()) {
                 try {
@@ -87,7 +102,12 @@ class LocalBridge implements Runnable {
                 } catch (Exception ignored) {
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // Раньше исключение молча проглатывалось, и кнопка «Локальный»
+            // выглядела как «ничего не делает» — теперь причина видна в логе.
+            bound = false;
+            error = String.valueOf(e);
+            MainActivity.log("bridge: FAILED to bind %d: %s", port, e);
         }
         running.set(false);
     }
@@ -171,23 +191,35 @@ class LocalBridge implements Runnable {
             }
             int dc = (short) ((plain64[60] & 0xFF) | ((plain64[61] & 0xFF) << 8));
             if (dc < 0) dc = -dc;
-            if (dc == 0) dc = 2;
 
             MainActivity.Proxy p = pick.pick();
-            if (p == null || !"mtproto".equals(p.proto)) {
+            if (p == null) {
                 c.close();
                 return;
             }
-            boolean fakeTls = p.secret.toLowerCase().startsWith("ee");
-            byte[] secret = fakeTls ? obfSecret(p.secret) : secretBytes(p.secret);
+            // Мост принимает и MTProto, и SOCKS5 апстрим. Telegram к нам всегда
+            // приходит по MTProto, а дальше мост сам решает, как доставить поток
+            // выбранному прокси. Раньше здесь стоял жёсткий отказ по типу, и при
+            // мёртвом MTProto-списке локальный прокси не поднимался вообще.
+            boolean socks = "socks5".equals(p.proto);
+            boolean fakeTls = !socks && p.secret != null && p.secret.toLowerCase().startsWith("ee");
+            byte[] secret = socks ? LOCAL_SECRET
+                    : (fakeTls ? obfSecret(p.secret) : secretBytes(p.secret));
+            MainActivity.log("bridge: dc=%d upstream=%s %s:%d", dc, p.proto, p.host, p.port);
 
             if (!fakeTls) {
-                final HS up = build(tag, dc, secret);
-                final Socket us = new Socket();
-                us.connect(new InetSocketAddress(p.host, p.port), 8000);
+                final HS up = build(tag, dcIndex(dc), secret);
+                final Socket us;
+                if (socks) {
+                    us = socksToDc(p, dc);
+                } else {
+                    us = new Socket();
+                    us.connect(new InetSocketAddress(p.host, p.port), 8000);
+                }
                 us.setSoTimeout(10000);
                 us.getOutputStream().write(up.head());
                 us.getOutputStream().flush();
+                MainActivity.log("bridge: relaying via %s", p.proto);
                 Thread t1 = new Thread(() -> pipePlain(c, us, recvC, up.send(), false));
                 Thread t2 = new Thread(() -> pipePlain(us, c, up.recv(), sendC, false));
                 t1.start(); t2.start(); t1.join(); t2.join();
@@ -254,6 +286,39 @@ class LocalBridge implements Runnable {
                 u.close();
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    // Индекс реального DC в таблице адресов. Telegram шлёт 1..5, но может
+    // прислать и служебное значение — тогда берём DC2.
+    static int dcIndex(int dc) {
+        return (dc >= 1 && dc < MainActivity.Net.DC_ADDRS.length) ? dc - 1 : 1;
+    }
+
+    static byte[] anySecret() {
+        byte[] b = new byte[16];
+        new java.security.SecureRandom().nextBytes(b);
+        return b;
+    }
+
+    // SOCKS5-апстрим: подключаемся к прокси и просим его открыть соединение с
+    // настоящим DC Telegram, который выбрал клиент. Дальше по туннелю идёт
+    // тот же обфусцированный поток, что и для MTProto-апстрима.
+    private Socket socksToDc(MainActivity.Proxy p, int dc) throws Exception {
+        String ip = MainActivity.Net.DC_ADDRS[dcIndex(dc)][0];
+        Socket s = new Socket();
+        try {
+            s.connect(new InetSocketAddress(p.host, p.port), 8000);
+            s.setSoTimeout(8000);
+            if (!MainActivity.Net.socksConnect(s, p, ip, 443, 8)) {
+                throw new java.io.IOException("socks CONNECT to " + ip + " refused");
+            }
+            MainActivity.log("bridge: socks tunnelled to DC%d %s:443", dcIndex(dc) + 1, ip);
+            return s;
+        } catch (Exception e) {
+            MainActivity.log("bridge: socks upstream %s failed: %s", p.host, e);
+            try { s.close(); } catch (Exception ignored) {}
+            throw e;
         }
     }
 

@@ -53,7 +53,7 @@ import javax.net.ssl.HttpsURLConnection;
 public class MainActivity extends Activity {
 
     static final String AUTHOR_URL = "https://t.me/yetilov";
-    static final String APP_VERSION = "0.2.0";
+    static final String APP_VERSION = "0.2.1";
     static final int MAX_SERVERS = 30;
     static final int LOCAL_PORT = 10811;
     static final int REPING_MS = 6000;
@@ -229,7 +229,10 @@ public class MainActivity extends Activity {
             for (String url : urls) {
                 fs.add(ex.submit(() -> {
                     try {
-                        HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
+                        // HttpURLConnection, а не HttpsURLConnection: список мог
+                        // приехать и по обычному http, жёсткий каст ронял весь
+                        // источник целиком.
+                        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new URL(url).openConnection();
                         c.setConnectTimeout(15000);
                         c.setReadTimeout(15000);
                         c.setRequestProperty("User-Agent", "MTProtoFinder");
@@ -346,11 +349,20 @@ public class MainActivity extends Activity {
                 s.setSoTimeout((int) (timeout * 1000));
                 boolean ok = false, alive = false;
                 if ("socks5".equals(p.proto)) {
+                    // Пингуем ровно так, как это сделает Telegram: CONNECT на
+                    // настоящий адрес DC и обмен req_pq_multi -> ResPQ внутри
+                    // туннеля. Раньше прокси просили соединиться с самим собой,
+                    // и в измерение попадал лишний круг по интернету — число
+                    // выходило в разы завышенным (1500 мс вместо ~500).
+                    // Заодно «рабочим» теперь становится только тот прокси,
+                    // через который Telegram действительно отвечает.
+                    // s уже подключён — значит порт прокси отвечает.
                     alive = true;
-                    // Для живучести достаточно CONNECT; для честного «работает с
-                    // Telegram» — только успешный CONNECT (прокси обязан уметь
-                    // открывать соединение наружу).
-                    ok = socksConnect(s, p, p.host, p.port, timeout);
+                    for (int dc = 1; dc < 3; dc++) {
+                        if (Thread.currentThread().isInterrupted()) break;
+                        double ms = telegramPing(p, dc, Math.max(timeout, 2.5));
+                        if (ms > 0) { ok = true; break; }
+                    }
                 } else if (p.secret.toLowerCase().startsWith("ee")) {
                     // Честная проверка FakeTLS: живым считается только прокси,
                     // ответивший настоящим ResPQ на req_pq_multi ВНУТРИ
@@ -437,7 +449,10 @@ public class MainActivity extends Activity {
                 s.setSoTimeout((int) (timeout * 1000));
                 if ("socks5".equals(p.proto)) {
                     if (!socksConnect(s, p, ip, 443, timeout)) return -1;
-                    if (!mtprotoPing(s, randomSecretHex(), dcId, timeout)) return -1;
+                    // Для замера RTT секрет выбирает клиент, поэтому здесь
+                    // подходит любое значение — берём фиксированное, чтобы замер
+                    // был воспроизводимым. На задержку это не влияет.
+                    if (!mtprotoPing(s, PROBE_SECRET_HEX, dcId, timeout)) return -1;
                 } else if (p.secret.toLowerCase().startsWith("ee")) {
                     // нативный TLS-туннель по SNI из секрета
                     s.close(); s = null;
@@ -533,6 +548,11 @@ public class MainActivity extends Activity {
             {"149.154.167.91", "4"},
             {"149.154.171.5", "5"},
         };
+
+        // Секрет для замера задержки через SOCKS5. Telegram DC принимает любой
+        // секрет, который объявляет клиент, поэтому фиксированное значение
+        // корректно и делает замер воспроизводимым.
+        static final String PROBE_SECRET_HEX = "0123456789abcdef0123456789abcdef";
 
         // Обмен req_pq_multi -> ResPQ по уже открытому потоку (Socket или
         // SSLSocket) с указанием номера DC, к которому идёт трафик.
@@ -1180,30 +1200,48 @@ public class MainActivity extends Activity {
             return;
         }
         Proxy best = bestLive();
-        if (best == null) { toast("Нет рабочего MTProto — подождите проверки"); return; }
-        if (Net.handshakePing(best, 2)[0] < 0) {
-            toast("Прокси сейчас недоступен — выберите другой");
-            setStatus("⚠ " + best.host + " недоступен прямо сейчас");
-            return;
-        }
+        if (best == null) { toast("Нет рабочих прокси — подождите проверки"); return; }
         // Мост сам перебирает живые серверы на каждом подключении: раньше
         // выбранный прокси замораживался на момент нажатия, и после его смерти
         // локальный прокси не поднимался вообще.
         bridge = new LocalBridge(LOCAL_PORT, this::bestLive);
         bridge.start();
+        // start() только ставит поток: сокет мог не подняться, и раньше это
+        // выглядело как «кнопка ничего не делает». Ждём фактического bind.
+        long deadline = System.currentTimeMillis() + 2500;
+        while (System.currentTimeMillis() < deadline && !bridge.isBound() && bridge.lastError() == null) {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) { }
+        }
+        if (!bridge.isBound()) {
+            String err = bridge.lastError();
+            bridge.stop();
+            bridge = null;
+            setStatus("Локальный прокси не запустился");
+            toast(err == null ? "Не удалось занять порт " + LOCAL_PORT : "Порт " + LOCAL_PORT + ": " + err);
+            return;
+        }
         btnLocal.setBackground(pressable(C_PRIMARY, 0xFF175FBF));
-        setStatus("Локальный прокси 127.0.0.1:" + LOCAL_PORT + " через " + best.host);
+        setStatus("Локальный прокси 127.0.0.1:" + LOCAL_PORT + " · " + best.label() + " " + best.host);
         open("tg://proxy?server=127.0.0.1&port=" + LOCAL_PORT + "&secret=" + LocalBridge.LOCAL_SECRET_HEX);
     }
 
-    // Лучший сейчас рабочий MTProto, перепроверяемый на лету.
+    // Лучший сейчас рабочий прокси, перепроверяемый на лету. Мост умеет и
+    // MTProto, и SOCKS5, поэтому берём любой рабочий — раньше тут жёстко
+    // оставляли только MTProto, и при мёртвом MTProto-списке кнопка «Локальный»
+    // всегда отказывала, хотя живые SOCKS5 рядом были.
     synchronized Proxy bestLive() {
         List<Proxy> cands = new ArrayList<>();
         for (Proxy p : all)
-            if ("mtproto".equals(p.proto) && p.valid && p.ping > 0) cands.add(p);
+            if (p.valid && p.ping > 0) cands.add(p);
         if (cands.isEmpty()) return null;
-        Collections.sort(cands, (a, b) -> Double.compare(a.ping, b.ping));
-        for (int i = 0; i < Math.min(3, cands.size()); i++) {
+        // Сначала те, где подтверждена связь с Telegram, потом просто рабочие.
+        Collections.sort(cands, (a, b) -> {
+            int at = a.tgChecked ? (a.tgPing > 0 ? 0 : 2) : 1;
+            int bt = b.tgChecked ? (b.tgPing > 0 ? 0 : 2) : 1;
+            if (at != bt) return at - bt;
+            return Double.compare(a.ping, b.ping);
+        });
+        for (int i = 0; i < Math.min(4, cands.size()); i++) {
             Proxy p = cands.get(i);
             if (Net.handshakePing(p, 2)[0] > 0) return p;
             p.valid = false;
